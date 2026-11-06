@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  
+  body {
+    @apply bg-charcoal-950 text-charcoal-100 antialiased overflow-hidden;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2c3340;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #424c5e;
+}
+
+/* Markdown typography refinements */
+.prose-aurevon {
+  color: #e2e8f0;
+  line-height: 1.7;
+}
+
+.prose-aurevon p {
+  margin-bottom: 0.85em;
+}
+
+.prose-aurevon p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-aurevon h1,
+.prose-aurevon h2,
+.prose-aurevon h3,
+.prose-aurevon h4 {
+  color: #f8fafc;
+  font-weight: 600;
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+}
+
+.prose-aurevon h1 { font-size: 1.4rem; }
+.prose-aurevon h2 { font-size: 1.25rem; }
+.prose-aurevon h3 { font-size: 1.1rem; }
+
+.prose-aurevon ul,
+.prose-aurevon ol {
+  margin-left: 1.4em;
+  margin-bottom: 0.85em;
+}
+
+.prose-aurevon ul { list-style-type: disc; }
+.prose-aurevon ol { list-style-type: decimal; }
+
+.prose-aurevon li {
+  margin-bottom: 0.35em;
+}
+
+.prose-aurevon pre {
+  background-color: #11141a;
+  border: 1px solid #1e232d;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  overflow-x: auto;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 0.875rem;
+}
+
+.prose-aurevon code {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.prose-aurevon :not(pre) > code {
+  background-color: #1e232d;
+  color: #818cf8;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+}
+
+.prose-aurevon blockquote {
+  border-left: 3px solid #6366f1;
+  padding-left: 0.85rem;
+  color: #94a3b8;
+  font-style: italic;
+  margin: 0.85rem 0;
+}
+
+.prose-aurevon table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.prose-aurevon th,
+.prose-aurevon td {
+  border: 1px solid #2c3340;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.prose-aurevon th {
+  background-color: #171b23;
+  color: #f1f5f9;
+}
