@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Send, Square, Sparkles, ChevronDown } from 'lucide-react';
+import { Send, Square, Sparkles, ChevronDown, Sliders } from 'lucide-react';
 import { ModelInfo } from '../../types';
 
 interface ComposerProps {
@@ -11,6 +11,7 @@ interface ComposerProps {
   selectedModel: string;
   models: ModelInfo[];
   onSelectModel: (modelId: string) => void;
+  onOpenModelManagement?: () => void;
   disabled?: boolean;
 }
 
@@ -23,6 +24,7 @@ export const Composer: React.FC<ComposerProps> = ({
   selectedModel,
   models,
   onSelectModel,
+  onOpenModelManagement,
   disabled = false,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -78,6 +80,17 @@ export const Composer: React.FC<ComposerProps> = ({
               </select>
               <ChevronDown size={11} className="text-charcoal-400 pointer-events-none" />
             </div>
+
+            {onOpenModelManagement && (
+              <button
+                type="button"
+                onClick={onOpenModelManagement}
+                className="p-1 rounded-lg bg-charcoal-800/80 border border-charcoal-700/60 text-charcoal-400 hover:text-white hover:bg-charcoal-800 transition-colors"
+                title="Manage Models & Providers"
+              >
+                <Sliders size={12} />
+              </button>
+            )}
           </div>
 
           {/* Action Button: Send or Stop */}

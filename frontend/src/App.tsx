@@ -5,6 +5,7 @@ import { WelcomeScreen } from './components/chat/WelcomeScreen';
 import { Composer } from './components/composer/Composer';
 import { AuthModal } from './components/auth/AuthModal';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { ModelManagementModal } from './components/models/ModelManagementModal';
 import {
   fetchConversations,
   fetchConversation,
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isModelModalOpen, setIsModelModalOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -356,11 +358,12 @@ export const App: React.FC = () => {
             selectedModel={selectedModel}
             models={models}
             onSelectModel={setSelectedModel}
+            onOpenModelManagement={() => setIsModelModalOpen(true)}
           />
         </div>
       </main>
 
-      {/* Phase 2: Modals */}
+      {/* Phase 2 & 3: Modals */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
@@ -378,6 +381,14 @@ export const App: React.FC = () => {
           }
         }}
         models={models}
+      />
+
+      <ModelManagementModal
+        isOpen={isModelModalOpen}
+        onClose={() => setIsModelModalOpen(false)}
+        models={models}
+        providerHealths={systemStatus?.providers || []}
+        onRefresh={handleRefreshHealth}
       />
     </div>
   );
