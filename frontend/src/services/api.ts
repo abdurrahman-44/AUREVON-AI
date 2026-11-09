@@ -66,6 +66,139 @@ export async function updateUserSettings(settings: Partial<UserSettings>): Promi
   return res.json();
 }
 
+// ----------------- Documents (RAG) -----------------
+export async function uploadDocument(file: File): Promise<any> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/documents/upload`, {
+    method: 'POST',
+    headers: { ...getAuthHeader() },
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Upload failed');
+  }
+  return res.json();
+}
+
+export async function fetchDocuments(): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/documents`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error('Failed to fetch documents');
+  return res.json();
+}
+
+export async function deleteDocument(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/documents/${id}`, {
+    method: 'DELETE',
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error('Failed to delete document');
+}
+
+export async function queryDocuments(query: string, topK: number = 4): Promise<any> {
+  const res = await fetch(`${API_BASE}/documents/query`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ query, top_k: topK }),
+  });
+  if (!res.ok) throw new Error('Query failed');
+  return res.json();
+}
+
+// ----------------- Memory System -----------------
+export async function fetchMemories(): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/memory`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error('Failed to fetch memories');
+  return res.json();
+}
+
+export async function createMemory(content: string, category: string = 'general'): Promise<any> {
+  const res = await fetch(`${API_BASE}/memory`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ content, category }),
+  });
+  if (!res.ok) throw new Error('Failed to create memory');
+  return res.json();
+}
+
+export async function updateMemory(id: string, updates: { content?: string; category?: string; is_active?: boolean }): Promise<any> {
+  const res = await fetch(`${API_BASE}/memory/${id}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error('Failed to update memory');
+  return res.json();
+}
+
+export async function deleteMemory(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/memory/${id}`, {
+    method: 'DELETE',
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error('Failed to delete memory');
+}
+
+// ----------------- Web Research -----------------
+export async function executeResearch(query: string, maxSources: number = 4): Promise<any> {
+  const res = await fetch(`${API_BASE}/research`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ query, max_sources: maxSources }),
+  });
+  if (!res.ok) throw new Error('Research failed');
+  return res.json();
+}
+
+// ----------------- AI Agent Platform -----------------
+export async function fetchAgentTools(): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/agents/tools`);
+  if (!res.ok) throw new Error('Failed to fetch agent tools');
+  return res.json();
+}
+
+export async function runAgentTask(task: string, model?: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/agents/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify({ task, model }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Agent execution failed');
+  }
+  return res.json();
+}
+
+export async function fetchAgentRuns(): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/agents/runs`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error('Failed to fetch agent runs');
+  return res.json();
+}
+
 // ----------------- Conversations -----------------
 export async function fetchConversations(): Promise<Conversation[]> {
   const res = await fetch(`${API_BASE}/conversations`, {
@@ -131,10 +264,11 @@ export async function fetchSystemHealth(): Promise<SystemStatus> {
 }
 
 export interface StreamChatParams {
-  conversationId?: string;
+  conversationId?: string | null;
   message: string;
   model?: string;
   temperature?: number;
+  images?: string[];
   abortSignal?: AbortSignal;
   onChunk: (delta: string) => void;
   onInit?: (data: { conversation_id: string; user_message_id: string }) => void;
@@ -147,6 +281,7 @@ export async function streamChat({
   message,
   model,
   temperature = 0.7,
+  images,
   abortSignal,
   onChunk,
   onInit,
@@ -166,6 +301,7 @@ export async function streamChat({
         message,
         model,
         temperature,
+        images,
         stream: true,
       }),
       signal: abortSignal,

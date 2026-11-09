@@ -6,6 +6,10 @@ import { Composer } from './components/composer/Composer';
 import { AuthModal } from './components/auth/AuthModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { ModelManagementModal } from './components/models/ModelManagementModal';
+import { DocumentsModal } from './components/documents/DocumentsModal';
+import { MemoryModal } from './components/memory/MemoryModal';
+import { ResearchModal } from './components/research/ResearchModal';
+import { AgentModal } from './components/agents/AgentModal';
 import {
   fetchConversations,
   fetchConversation,
@@ -30,12 +34,18 @@ export const App: React.FC = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-  // Phase 2: User Accounts & Settings State
+  // User Accounts & Settings State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
+
+  // Intelligence Ecosystem Modals State
+  const [isDocumentsModalOpen, setIsDocumentsModalOpen] = useState(false);
+  const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
+  const [isResearchModalOpen, setIsResearchModalOpen] = useState(false);
+  const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -119,53 +129,47 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     localStorage.removeItem('aurevon_token');
     setCurrentUser(null);
     setUserSettings(null);
     handleNewChat();
-    // Reload guest/unassigned conversations
-    try {
-      const convs = await fetchConversations();
-      setConversations(convs);
-    } catch (e) {
-      console.error('Failed to reload conversations:', e);
-    }
+    loadInitialData();
   };
 
-  const handleRefreshHealth = async () => {
-    try {
-      const [health, modelList] = await Promise.all([fetchSystemHealth(), fetchModels()]);
-      setSystemStatus(health);
-      setModels(modelList);
-    } catch (e) {
-      console.error('Failed to refresh health:', e);
-    }
-  };
-
-  // Switch active conversation
+  // Switch conversation
   const handleSelectConversation = async (id: string) => {
-    if (isStreaming) {
-      handleStopGeneration();
-    }
-    setActiveConversationId(id);
+    if (activeConversationId === id) return;
     try {
       const detail = await fetchConversation(id);
-      setMessages(detail.messages || []);
+      setActiveConversationId(id);
+      setMessages(detail.messages);
+      setStreamingContent('');
     } catch (err) {
-      console.error('Error fetching conversation detail:', err);
+      console.error('Failed to load conversation messages:', err);
     }
   };
 
-  // Start new chat
+  // Start new conversation
   const handleNewChat = () => {
-    if (isStreaming) {
-      handleStopGeneration();
-    }
     setActiveConversationId(null);
     setMessages([]);
     setInput('');
     setStreamingContent('');
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  };
+
+  // Refresh runtime health
+  const handleRefreshHealth = async () => {
+    try {
+      const [h, modelList] = await Promise.all([fetchSystemHealth(), fetchModels()]);
+      setSystemStatus(h);
+      setModels(modelList);
+    } catch (err) {
+      console.error('Failed to refresh health:', err);
+    }
   };
 
   // Rename conversation
@@ -202,17 +206,17 @@ export const App: React.FC = () => {
     scrollToBottom();
   }, [messages, streamingContent]);
 
-  // Send message and stream AI response
-  const handleSend = async (customPrompt?: string) => {
-    const promptToSend = (customPrompt || input).trim();
-    if (!promptToSend || isStreaming) return;
+  // Send message and stream AI response (multimodal capable)
+  const handleSend = async (customPrompt?: string, images?: string[]) => {
+    const promptToSend = (customPrompt !== undefined ? customPrompt : input).trim();
+    if ((!promptToSend && (!images || images.length === 0)) || isStreaming) return;
 
     setInput('');
     const tempUserMessage: Message = {
       id: `temp-${Date.now()}`,
       conversation_id: activeConversationId || '',
       role: 'user',
-      content: promptToSend,
+      content: promptToSend || '(Attached image)',
       model: selectedModel,
       created_at: new Date().toISOString(),
     };
@@ -230,8 +234,9 @@ export const App: React.FC = () => {
     try {
       await streamChat({
         conversationId: activeConversationId || undefined,
-        message: promptToSend,
+        message: promptToSend || 'Explain this image',
         model: selectedModel,
+        images: images,
         abortSignal: controller.signal,
         onInit: (data) => {
           if (!currentConversationId && data.conversation_id) {
@@ -311,6 +316,10 @@ export const App: React.FC = () => {
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
         onLogout={handleLogout}
+        onOpenDocuments={() => setIsDocumentsModalOpen(true)}
+        onOpenMemory={() => setIsMemoryModalOpen(true)}
+        onOpenResearch={() => setIsResearchModalOpen(true)}
+        onOpenAgents={() => setIsAgentModalOpen(true)}
       />
 
       {/* Main Chat Viewport */}
@@ -352,7 +361,7 @@ export const App: React.FC = () => {
           <Composer
             input={input}
             setInput={setInput}
-            onSend={() => handleSend()}
+            onSend={(text, images) => handleSend(text, images)}
             onStop={handleStopGeneration}
             isStreaming={isStreaming}
             selectedModel={selectedModel}
@@ -363,7 +372,7 @@ export const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Phase 2 & 3: Modals */}
+      {/* Modals Suite */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
@@ -389,6 +398,26 @@ export const App: React.FC = () => {
         models={models}
         providerHealths={systemStatus?.providers || []}
         onRefresh={handleRefreshHealth}
+      />
+
+      <DocumentsModal
+        isOpen={isDocumentsModalOpen}
+        onClose={() => setIsDocumentsModalOpen(false)}
+      />
+
+      <MemoryModal
+        isOpen={isMemoryModalOpen}
+        onClose={() => setIsMemoryModalOpen(false)}
+      />
+
+      <ResearchModal
+        isOpen={isResearchModalOpen}
+        onClose={() => setIsResearchModalOpen(false)}
+      />
+
+      <AgentModal
+        isOpen={isAgentModalOpen}
+        onClose={() => setIsAgentModalOpen(false)}
       />
     </div>
   );

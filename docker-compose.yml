@@ -1,0 +1,79 @@
+version: '3.8'
+
+# ==============================================================================
+# AUREVON AI - Production Multi-Container Orchestration
+# Services: PostgreSQL 16 + FastAPI Backend + Nginx SPA Frontend
+# ==============================================================================
+
+services:
+  # 1. Primary Relational Database
+  db:
+    image: postgres:16-alpine
+    container_name: aurevon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aurevon}
+      POSTGRES_USER: ${POSTGRES_USER:-aurevon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aurevon_secure_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aurevon} -d ${POSTGRES_DB:-aurevon}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aurevon-network
+
+  # 2. FastAPI Intelligence Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: aurevon-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aurevon}:${POSTGRES_PASSWORD:-aurevon_secure_secret}@db:5432/${POSTGRES_DB:-aurevon}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-b7c89f2a4e6d8190c3a5e782914619d850a1c2e47890f123456789abcdef0123}
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 10080
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-qwen2.5:3b}
+      MODEL_CONTEXT_WINDOW: 8192
+      CORS_ORIGINS: '["http://localhost", "http://localhost:3000", "http://127.0.0.1:3000"]'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - backend_uploads:/app/backend/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - aurevon-network
+
+  # 3. Static Nginx Reverse-Proxy & SPA
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: aurevon-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - aurevon-network
+
+networks:
+  aurevon-network:
+    name: aurevon-network
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: aurevon-postgres-data
+  backend_uploads:
+    name: aurevon-backend-uploads

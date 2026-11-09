@@ -6,6 +6,7 @@ from backend.app.models.entities import (
     UserSettings,
     Memory,
     Document,
+    DocumentChunk,
     AgentRun,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "UserSettings",
     "Memory",
     "Document",
+    "DocumentChunk",
     "AgentRun",
 ]

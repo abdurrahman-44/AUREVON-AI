@@ -22,7 +22,7 @@ class BaseAIProvider(ABC):
     @abstractmethod
     async def stream_chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         context_window: int = 8192,
@@ -33,7 +33,7 @@ class BaseAIProvider(ABC):
     @abstractmethod
     async def complete_chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         context_window: int = 8192,

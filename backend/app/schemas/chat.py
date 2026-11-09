@@ -13,6 +13,7 @@ class ChatRequest(BaseModel):
     model: Optional[str] = Field(None, description="Model to use (defaults to configured system model)")
     temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0)
     stream: bool = Field(True, description="Whether to stream response chunks via SSE")
+    images: Optional[List[str]] = Field(None, description="Optional base64-encoded images for multimodal vision models")
 
 
 class ChatChunk(BaseModel):

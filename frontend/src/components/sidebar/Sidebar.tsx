@@ -16,6 +16,10 @@ import {
   User as UserIcon,
   LogOut,
   LogIn,
+  FileText,
+  Brain,
+  Globe,
+  Bot,
 } from 'lucide-react';
 import { Conversation, SystemStatus, User } from '../../types';
 
@@ -34,6 +38,10 @@ interface SidebarProps {
   onOpenAuth: () => void;
   onOpenSettings: () => void;
   onLogout: () => void;
+  onOpenDocuments: () => void;
+  onOpenMemory: () => void;
+  onOpenResearch: () => void;
+  onOpenAgents: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -51,6 +59,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAuth,
   onOpenSettings,
   onLogout,
+  onOpenDocuments,
+  onOpenMemory,
+  onOpenResearch,
+  onOpenAgents,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -92,7 +104,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   if (isCollapsed) {
     return (
       <aside className="w-16 bg-charcoal-900 border-r border-charcoal-800 flex flex-col items-center py-4 justify-between transition-all select-none">
-        <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-col items-center gap-3">
           <button
             onClick={() => setIsCollapsed(false)}
             className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-300 hover:text-white transition-colors"
@@ -106,6 +118,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title="New Conversation"
           >
             <Plus size={18} />
+          </button>
+          <div className="w-8 h-[1px] bg-charcoal-800 my-1" />
+          <button
+            onClick={onOpenDocuments}
+            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-teal-400 transition-colors"
+            title="Documents (RAG)"
+          >
+            <FileText size={17} />
+          </button>
+          <button
+            onClick={onOpenMemory}
+            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-teal-400 transition-colors"
+            title="Long-Term Memory"
+          >
+            <Brain size={17} />
+          </button>
+          <button
+            onClick={onOpenResearch}
+            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-teal-400 transition-colors"
+            title="Autonomous Web Research"
+          >
+            <Globe size={17} />
+          </button>
+          <button
+            onClick={onOpenAgents}
+            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-teal-400 transition-colors"
+            title="Autonomous Agent Runner"
+          >
+            <Bot size={17} />
           </button>
         </div>
 
@@ -169,6 +210,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
             placeholder="Search chats..."
             className="w-full bg-charcoal-800/60 border border-charcoal-700/50 rounded-xl pl-8 pr-3 py-1.5 text-xs text-charcoal-200 placeholder-charcoal-500 focus:outline-none focus:border-charcoal-600 transition-colors"
           />
+        </div>
+
+        {/* Intelligence Ecosystem Tools */}
+        <div className="grid grid-cols-2 gap-1.5 pt-1">
+          <button
+            onClick={onOpenDocuments}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-charcoal-800/60 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 text-[11px] text-charcoal-300 hover:text-white transition group"
+            title="Document Intelligence & RAG"
+          >
+            <FileText size={13} className="text-teal-400 shrink-0 group-hover:scale-110 transition-transform" />
+            <span className="truncate">Documents</span>
+          </button>
+          <button
+            onClick={onOpenMemory}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-charcoal-800/60 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 text-[11px] text-charcoal-300 hover:text-white transition group"
+            title="Long-Term Memory"
+          >
+            <Brain size={13} className="text-teal-400 shrink-0 group-hover:scale-110 transition-transform" />
+            <span className="truncate">Memory</span>
+          </button>
+          <button
+            onClick={onOpenResearch}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-charcoal-800/60 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 text-[11px] text-charcoal-300 hover:text-white transition group"
+            title="Autonomous Web Research"
+          >
+            <Globe size={13} className="text-teal-400 shrink-0 group-hover:scale-110 transition-transform" />
+            <span className="truncate">Research</span>
+          </button>
+          <button
+            onClick={onOpenAgents}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-charcoal-800/60 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 text-[11px] text-charcoal-300 hover:text-white transition group"
+            title="Autonomous Agent Runner"
+          >
+            <Bot size={13} className="text-teal-400 shrink-0 group-hover:scale-110 transition-transform" />
+            <span className="truncate">Agents</span>
+          </button>
         </div>
       </div>
 

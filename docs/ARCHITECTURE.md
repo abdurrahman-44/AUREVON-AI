@@ -1,77 +1,113 @@
-# AUREVON AI — System Architecture
+# AUREVON AI — System Architecture Specification (v1.0)
 
 ## 1. Architectural Philosophy
 
-AUREVON AI is designed as an **independent, open-source-first, multimodal AI platform**.
-The core design prioritizes:
-- **Modular Monolith**: Clean module boundaries without premature microservice overhead.
-- **Provider Independence**: A pluggable AI provider abstraction decoupling core conversation and agent logic from any single inference engine.
-- **Local-First Privacy**: Seamless support for local inference (e.g. Ollama with Qwen/Llama) with zero cloud dependency required for baseline functionality.
-- **Relational Persistence**: Strict schema enforcement and relational integrity for conversations, messages, user settings, memories, and documents.
+AUREVON AI is built upon five foundational architectural tenets:
+1. **Model Independence**: Pluggable provider abstraction isolating application workflows from specific LLM runtimes.
+2. **Privacy and Open-Source First**: Optimized for local CPU execution via Ollama without requiring dedicated GPU or CUDA hardware, with seamless cloud failover when desired.
+3. **Multi-Layered Context Grounding**: Responses are enriched through three synergistic retrieval layers: conversation short-term memory, long-term episodic facts, and RAG document vectors.
+4. **Autonomous Agent Tooling**: Multi-step reasoning pipeline combining sandboxed AST static analysis, safe AST calculators, web discovery, and semantic knowledge retrieval.
+5. **Production Hardening**: Strictly decoupled SPA architecture, non-root Docker execution, asynchronous I/O, and zero untyped code paths.
 
 ---
 
-## 2. System Architecture Diagram
+## 2. High-Level System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Frontend["Frontend (React + Vite + Tailwind CSS)"]
-        UI["Chat Interface & Layout"]
-        Hook["useChat / EventStream Reader"]
-        SStore["State: Messages, Convs, Health"]
+    User([User Browser])
+    
+    subgraph Frontend ["Frontend (React 18 + Vite + Tailwind CSS)"]
+        UI[Chat Interface / Workspace]
+        Sidebar[Sidebar & History Navigation]
+        Composer[Composer & Multimodal Attachment]
+        Modals[Documents, Memory, Research, Agents, Models, Settings]
     end
 
-    subgraph Backend["Backend (FastAPI Modular Monolith)"]
-        Router["API Gateway / Routes (/api)"]
-        ChatEngine["Chat & Context Orchestration"]
-        ProviderLayer["AI Provider Abstraction Layer"]
-        RepoLayer["Repository Access Layer"]
+    subgraph NginxGateway ["Edge Layer (Nginx Reverse Proxy)"]
+        Nginx[Nginx Alpine Proxy / Port 80/3000]
     end
 
-    subgraph Storage["Persistence & Local Runtimes"]
-        DB[("PostgreSQL / SQLite Storage")]
-        OllamaEngine["Ollama Runtime (Local Models: Qwen, Llama)"]
+    subgraph BackendCore ["Backend Core (FastAPI Asynchronous Engine)"]
+        API[API Router / Middleware / JWT Security]
+        ChatEngine[SSE Token Streaming Engine]
+        ContextEnricher[Context Enrichment Pipeline]
+        AgentRunner[Autonomous Agent Engine]
+        ModelRouter[Model Routing & Capability Checker]
     end
 
-    UI --> Hook
-    Hook --> SStore
-    Hook -- "POST /api/chat (SSE)" --> Router
-    UI -- "REST CRUD" --> Router
+    subgraph KnowledgeLayer ["Knowledge & Retrieval Systems"]
+        RAG[RAG Document Service & Semantic Chunker]
+        MemoryMgr[Long-Term Memory Manager]
+        WebResearch[Live Web Research Engine]
+    end
 
-    Router --> ChatEngine
-    Router --> RepoLayer
-    ChatEngine --> ProviderLayer
-    ChatEngine --> RepoLayer
-    RepoLayer --> DB
-    ProviderLayer -- "HTTP /api/chat" --> OllamaEngine
+    subgraph ToolRegistry ["Sandboxed Agent Tools"]
+        SafeCalc[Safe AST Math Calculator]
+        ASTAnalyzer[AST Python Static Code Analyzer]
+        DocSearch[Semantic Document Search Tool]
+        WebSearch[DuckDuckGo Web Search Tool]
+    end
+
+    subgraph StorageLayer ["Persistence Layer"]
+        Postgres[(PostgreSQL 16 Relational DB / SQLite Dev)]
+        DocStorage[Document File Repository]
+    end
+
+    subgraph InferenceLayer ["Inference Layer (Pluggable)"]
+        OllamaLocal[Ollama Local Runtime (qwen2.5, llava)]
+        OpenAICloud[OpenAI (GPT-4o, GPT-4o-mini)]
+        GroqCloud[Groq (Llama-3.3-70B)]
+        DeepSeekCloud[DeepSeek (DeepSeek-Chat)]
+    end
+
+    User --> Nginx
+    Nginx --> UI
+    Nginx --> API
+    API --> ChatEngine
+    ChatEngine --> ContextEnricher
+    ChatEngine --> ModelRouter
+    ContextEnricher --> MemoryMgr
+    ContextEnricher --> RAG
+    API --> AgentRunner
+    AgentRunner --> ToolRegistry
+    MemoryMgr --> StorageLayer
+    RAG --> StorageLayer
+    API --> StorageLayer
+    ModelRouter --> InferenceLayer
 ```
 
 ---
 
-## 3. Core Modules
+## 3. Core Subsystems
 
-### 3.1 AI Provider Abstraction (`backend/app/services/ai/`)
-- `BaseAIProvider`: Abstract interface specifying health checks, model discovery, token streaming, and synchronous completion.
-- `OllamaProvider`: Concrete implementation interfacing with the local Ollama daemon (`http://127.0.0.1:11434`), supporting GGUF quantized models like `qwen2.5:3b` and `qwen3:4b`.
-- `ProviderFactory`: Factory pattern resolving providers dynamically without modifying API handlers.
+### 3.1 Pluggable Model Provider Architecture (`BaseAIProvider`)
+All AI model providers implement a common asynchronous interface:
+- `check_health() -> ProviderHealth`
+- `list_models() -> List[ModelInfo]`
+- `stream_chat(messages, model, temperature, context_window) -> AsyncGenerator[str, None]`
+- `complete_chat(messages, model, temperature, context_window) -> str`
 
-### 3.2 Relational Data Tier (`backend/app/models/` & `backend/app/database/`)
-- Asynchronous SQLAlchemy 2.0 with connection pooling.
-- Dual-driver flexibility:
-  - **PostgreSQL**: Target database for multi-user production (`postgresql+asyncpg://`).
-  - **SQLite**: Automatic zero-config local development (`sqlite+aiosqlite:///`).
-- Entities:
-  - `User`: Identity, authentication credentials, and account metadata.
-  - `Conversation`: Thread containers with title, user foreign key, and ordering indexes.
-  - `Message`: Conversational turns with role (`user`, `assistant`, `system`), token usage, and model tracking.
-  - `UserSettings`: UI themes, preferred default models, and memory flags.
-  - `Memory`: Cross-conversation facts and user preferences.
-  - `Document`: Uploaded document metadata and processing stages.
-  - `AgentRun`: Multi-step agent executions and tool logs.
+The `ProviderFactory` manages active provider singletons (`OllamaProvider`, `OpenAICompatibleProvider`). When a user selects a model:
+- `chat.py` automatically routes the request to the matching provider.
+- `check_model_vision_capability` verifies if the target model supports multimodal images. If a text-only model is selected with an image, an informative capability notice is returned without crashing.
 
-### 3.3 Streaming Protocol
-- Real-time responses use **Server-Sent Events (SSE)** (`text/event-stream`).
-- Events stream as JSON payloads:
-  - `{"conversation_id": "...", "user_message_id": "...", "delta": "", "done": false}`
-  - `{"conversation_id": "...", "delta": "token", "done": false}`
-  - `{"conversation_id": "...", "assistant_message_id": "...", "delta": "", "done": true}`
+### 3.2 Context Enrichment Pipeline
+Before a prompt is forwarded to the LLM runtime, `chat.py` executes context enrichment:
+1. **Recent History**: Last 20 messages of the active conversation.
+2. **User Memory Retrieval**: Queries active memories relevant to the user query and injects them under system instructions.
+3. **RAG Semantic Search**: Computes prompt embedding, retrieves the most similar document chunks, and formats grounded source context.
+
+### 3.3 Autonomous Agent Architecture
+The `AgentRunner` executes complex multi-step reasoning tasks:
+1. **Planning Step**: Interprets the user's objective and constructs an execution plan.
+2. **Tool Execution Step**: Executes sandboxed tools from the registry (`SafeCalculator`, `ASTCodeAnalyzer`, `WebSearchTool`, `DocumentSearchTool`).
+   - Every tool input and output is validated and recorded.
+   - Code execution is strictly sandboxed using Python AST parsing—arbitrary shell code execution is disallowed.
+3. **Synthesis Step**: Aggregates all intermediate observations and synthesizes a final verified answer.
+4. **Audit Trail**: Every execution run is persisted to `agent_runs` in the database for auditing and review.
+
+### 3.4 Production Deployment Architecture
+- **Multi-stage backend container**: Runs on `python:3.12-slim-bookworm` as an unprivileged user `appuser`.
+- **Multi-stage frontend container**: Compiles static assets with Vite and serves them through high-performance `nginx:alpine`.
+- **Database**: PostgreSQL 16 Alpine container with persistent named volume `postgres_data` and automatic schema creation on startup.

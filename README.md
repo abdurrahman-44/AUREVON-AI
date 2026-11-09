@@ -1,38 +1,75 @@
-# AUREVON AI
+# AUREVON AI (v1.0)
 
 <div align="center">
-  <img src="frontend/public/logo.svg" width="110" height="110" alt="AUREVON AI Logo" />
+  <img src="frontend/public/logo.svg" width="115" height="115" alt="AUREVON AI Logo" />
   <h3>Independent, Open-Source-First, Multimodal AI Assistant Platform</h3>
-  <p>Local-first inference • Provider-independent architecture • Relational persistence • Private & Extensible</p>
+  <p>Local-first inference • Provider-independent architecture • Relational persistence • Document RAG • Long-Term Memory • Autonomous Agents</p>
 </div>
 
 ---
 
-## 🌟 Overview
+## 🌟 Executive Overview
 
-**AUREVON AI** is an independent, model-independent AI assistant platform engineered for deep reasoning, research, coding, memory, and autonomous workflows.
+**AUREVON AI** is an independent, model-independent AI assistant platform engineered for deep reasoning, research, document intelligence, long-term memory, and autonomous agent workflows.
 
-Unlike single-provider chatbots, AUREVON is architected as an extensible ecosystem that prioritizes:
-- **Local AI & User Privacy**: Zero-cloud dependency required — runs locally on consumer hardware via [Ollama](https://ollama.com).
-- **Model Independence**: Pluggable AI provider abstraction layer supporting Qwen, Llama, Gemma, and future cloud APIs without codebase rewrites.
-- **Persistent Conversational Context**: Relational database storage with schema enforcement, thread management, and multi-turn context retention.
-- **Refined Charcoal Dark UI**: Professional, minimalist aesthetic built with React, Vite, Tailwind CSS, Framer Motion, and Markdown syntax highlighting.
+Designed around consumer hardware constraints (Windows 11, CPU inference, integrated graphics, 16 GB RAM), AUREVON eliminates vendor lock-in by supporting both local privacy-first runtimes ([Ollama](https://ollama.com)) and high-performance cloud providers (OpenAI, Groq, DeepSeek) through a single unified architecture.
 
 ---
 
-## 🚀 Phase 1 Foundation (v0.1) — Implemented & Tested
+## 🏆 Full Feature Suite (Phases 1–10 Completed)
 
-The initial Phase 1 milestone is fully implemented and passes all automated acceptance tests:
+### 1. Intelligent Conversational Interface
+- **Real-Time Token Streaming**: Server-Sent Events (SSE) stream tokens with zero buffering.
+- **Relational Conversation Persistence**: Full CRUD for threads with renaming, deletion, and search.
+- **Multi-Turn Context Management**: Context window tracking with automated safe message truncation.
+- **Markdown & Syntax Highlighting**: Code blocks with language tagging, copy buttons, and table formatting.
 
-- [x] **Real-Time Streamed Chat**: Token-by-token streaming via Server-Sent Events (SSE).
-- [x] **Ollama Local AI Provider**: Native integration with local model discovery and status monitoring (`qwen2.5:3b`, `qwen3:4b`, `llama3.2:3b`).
-- [x] **Relational Persistence**: PostgreSQL-compatible schema with automatic SQLite development fallback (`sqlite+aiosqlite:///`).
-- [x] **Thread & History Management**: Create new chats, rename conversation titles, search chats, and delete conversations.
-- [x] **Multi-Turn Context Retention**: Conversation history is windowed and transmitted across consecutive conversational turns.
-- [x] **Interactive Markdown & Code**: Code blocks with copy-to-clipboard buttons, syntax highlighting, and formatting.
-- [x] **Model Selector**: Switch active models on the fly directly from the message composer.
-- [x] **Generation Controls**: Stop generation in real-time using `AbortController`.
-- [x] **Automated Acceptance Suite**: Complete end-to-end pytest suite verifying 100% of Phase 1 requirements.
+### 2. User Accounts & Security
+- **JWT Authentication**: Passwords salted and hashed via PBKDF2 SHA-256.
+- **Scoped User Ownership**: Conversations and data isolated per user with guest fallback.
+- **Configurable Preferences**: Theme customization (Dark / Light / System), generation temperature, and custom system instructions.
+
+### 3. Model Independence & Provider Hub
+- **Unified Catalog**: Simultaneous support for local Ollama models (`qwen2.5:3b`, `llava:7b`, `llama3.2:3b`) and cloud providers (`gpt-4o`, `llama-3.3-70b-versatile`, `deepseek-chat`).
+- **Dynamic Model Pulling**: Pull new Ollama models straight from the interface.
+- **In-Memory API Key Management**: Configure and hot-swap cloud API keys securely.
+
+### 4. Document Intelligence & Semantic RAG
+- **Multi-Format Ingestion**: Supports PDF, TXT, Markdown, CSV, Python, JavaScript, and HTML.
+- **Token-Aware Chunking**: Semantic windowing with overlap preserving document structure.
+- **Vector Similarity Search**: Asynchronous embedding pipeline retrieving source chunks.
+- **Context Grounding**: Assistant automatically cites document references when answering queries.
+
+### 5. Long-Term Semantic Memory
+- **Episodic & Fact Extraction**: Persists user preferences, projects, facts, and instructions across conversations.
+- **User-Controlled Memory Dashboard**: View, edit, toggle active status, and delete memories.
+- **System Prompt Injection**: Active memories are automatically injected into conversational turns.
+
+### 6. Autonomous Web Research
+- **Live Search Scraping**: Extracts real-time web results via DuckDuckGo.
+- **Multi-Source Synthesis**: Aggregates disparate web findings into a structured research report.
+- **Verified Citations**: Displays clickable ground-truth source links with relevant snippets.
+
+### 7. Autonomous Agent Platform
+- **Extensible Sandboxed Tools**:
+  - `SafeCalculator`: Mathematical expressions evaluated via Python AST parsing (zero `eval()` vulnerabilities).
+  - `ASTCodeAnalyzer`: Static AST analysis of Python syntax, functions, classes, and complexity.
+  - `WebSearchTool`: Dynamic web intelligence querying.
+  - `DocumentSearchTool`: Real-time RAG similarity searches.
+- **Multi-Step Execution Pipeline**: Planning -> Tool Invocation -> Grounded Synthesis.
+- **Execution Audit Logging**: Persistent trace logs recording every intermediate step, input, and output.
+
+### 8. Multimodal AI (Vision)
+- **Image Understanding**: Direct upload and attachment of images (PNG, JPEG, WebP) in chat.
+- **Capability Checking**: Model capabilities are enforced—text-only models gracefully warn the user to select a vision model (`llava:7b`, `gpt-4o`) rather than failing.
+
+### 9. Production Orchestration & Docker
+- **Docker Compose**: Production-ready configuration orchestrating PostgreSQL 16, FastAPI backend, and Nginx reverse proxy.
+- **Hardened Containers**: Python backend runs as unprivileged user `appuser`.
+- **Nginx SPA & SSE Proxy**: Static asset caching and unbuffered streaming proxy configuration.
+
+### 10. Comprehensive Verification
+- **100% Automated Test Suite**: 11 automated test suites in `backend/tests/` verifying all subsystem acceptance criteria (`11 passed in 47.98s`).
 
 ---
 
@@ -40,76 +77,51 @@ The initial Phase 1 milestone is fully implemented and passes all automated acce
 
 | Layer | Technologies |
 | :--- | :--- |
-| **Frontend** | React 18, TypeScript, Vite, Tailwind CSS, Framer Motion, Lucide React, React Markdown, Remark GFM |
+| **Frontend** | React 18, TypeScript, Vite, Tailwind CSS, Framer Motion, Lucide React, React Markdown |
 | **Backend** | Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2.0 (Async), HTTPX, Uvicorn |
-| **Database** | PostgreSQL (`postgresql+asyncpg://`) with SQLite development fallback (`sqlite+aiosqlite://`) |
-| **Local AI Runtime** | Ollama (`http://127.0.0.1:11434`) |
-| **Target Local Model** | `qwen2.5:3b` / `qwen3:4b` (Configurable via environment variables) |
+| **Database** | PostgreSQL 16 (Production) / SQLite Async (Local Development) |
+| **Local Inference** | Ollama (`http://127.0.0.1:11434`) |
+| **Deployment** | Docker, Docker Compose, Nginx Alpine, Multi-stage builds |
 
 ---
 
-## 💻 Quick Start (Windows 11)
+## 💻 Quick Start (Local Development)
 
-### 1. Launch with One Command
-From PowerShell in the project root:
+### 1. Launch with One Command (PowerShell)
 ```powershell
 .\scripts\run_dev.ps1
 ```
-This automatically launches the FastAPI backend and Vite frontend in parallel:
-- **Web Interface**: `http://127.0.0.1:5173`
+- **Web UI**: `http://127.0.0.1:5173`
 - **Backend API**: `http://127.0.0.1:8000`
-- **Interactive API Documentation**: `http://127.0.0.1:8000/docs`
+- **Interactive Swagger Docs**: `http://127.0.0.1:8000/docs`
 
 ---
 
-## 📦 Manual Installation & Setup
+## 🐳 Production Deployment (Docker Compose)
 
-### 1. Backend Setup
-```powershell
-# Create virtual environment with uv or python
-uv venv backend/.venv
-
-# Install dependencies
-uv pip install -r backend/requirements.txt --python backend/.venv/Scripts/python.exe
-
-# Setup environment file
-Copy-Item backend\.env.example backend\.env
-
-# Launch backend
-$env:PYTHONPATH = (Get-Location).Path
-& "backend\.venv\Scripts\python.exe" -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+### 1. Configure Environment
+```bash
+cp .env.production.example .env
 ```
 
-### 2. Frontend Setup
-```powershell
-cd frontend
-npm install
-npm run dev
+### 2. Launch Stack
+```bash
+docker compose up -d --build
 ```
-
-### 3. Setting Up Ollama (Local AI)
-To enable local inference:
-```powershell
-# Install Ollama (Windows)
-winget install Ollama.Ollama
-
-# Pull the recommended lightweight model
-ollama run qwen2.5:3b
-```
-AUREVON detects Ollama automatically on startup at `http://127.0.0.1:11434`.
+- **Web UI**: `http://localhost:3000`
+- **Backend API**: `http://localhost:8000`
+- **PostgreSQL**: Port 5432 (Internal)
 
 ---
 
-## 🧪 Testing & Quality Assurance
+## 🧪 Verification & Automated Testing
 
-Run the automated test suite:
+### Run Backend Pytest Suite
 ```powershell
-$env:PYTHONPATH = (Get-Location).Path
 & "backend\.venv\Scripts\python.exe" -m pytest backend/tests/ -v
 ```
-All Phase 1 acceptance criteria (health checks, conversation CRUD, SSE streaming, multi-turn persistence, and thread isolation) pass cleanly.
 
-Verify frontend TypeScript types and production bundle:
+### Build Frontend Production Assets
 ```powershell
 cd frontend
 npm run build
@@ -117,64 +129,5 @@ npm run build
 
 ---
 
-## 🗺️ Project Structure
-
-```text
-AUREVON-AI/
-│
-├── frontend/                     # React + TypeScript + Vite UI
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── chat/             # ChatMessage, WelcomeScreen
-│   │   │   ├── sidebar/          # Sidebar, ThreadList, Status
-│   │   │   ├── composer/         # Composer, Model Selector
-│   │   ├── services/             # API client & SSE stream reader
-│   │   ├── types/                # TypeScript type definitions
-│   │   ├── App.tsx               # Main application controller
-│   │   └── main.tsx
-│   ├── package.json
-│   ├── tailwind.config.js
-│   └── vite.config.ts
-│
-├── backend/                      # FastAPI Backend
-│   ├── app/
-│   │   ├── api/routes/           # Chat, Conversations, Models, Health
-│   │   ├── core/                 # Config & Pydantic settings
-│   │   ├── database/             # Async session & engine manager
-│   │   ├── models/               # SQLAlchemy ORM entities
-│   │   ├── schemas/              # Pydantic request/response schemas
-│   │   ├── services/ai/          # Provider abstraction & Ollama engine
-│   │   ├── repositories/         # Database access layer
-│   │   └── main.py               # FastAPI entrypoint & lifespan
-│   ├── tests/                    # Acceptance & integration tests
-│   ├── requirements.txt
-│   └── .env.example
-│
-├── docs/                         # Technical Documentation
-│   ├── ARCHITECTURE.md           # System design & data flow
-│   ├── ROADMAP.md                # 10-Phase progression plan
-│   ├── API.md                    # REST endpoint specifications
-│   └── DEVELOPMENT.md            # Developer setup instructions
-│
-├── scripts/                      # PowerShell launcher & helper scripts
-│   ├── run_dev.ps1               # Complete app launcher
-│   ├── run_backend.ps1           # Backend launcher
-│   ├── run_frontend.ps1          # Frontend launcher
-│   └── setup_ollama.ps1          # Ollama model setup helper
-│
-├── .gitignore
-├── LICENSE                       # MIT License
-└── README.md
-```
-
----
-
-## 🛡️ Security & Privacy Notice
-- API keys, local models, and user conversations are never exposed to third-party servers by default.
-- Passwords and credentials must not be committed to source control.
-- In-memory and local SQLite/PostgreSQL storage reside entirely within your machine.
-
----
-
 ## 📄 License
-This project is licensed under the [MIT License](LICENSE).
+AUREVON AI is open-source software released under the Apache 2.0 License.

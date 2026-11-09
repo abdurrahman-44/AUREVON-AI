@@ -133,11 +133,26 @@ class OllamaProvider(BaseAIProvider):
                 is_available=False,
                 is_default=False,
             ),
+            ModelInfo(
+                id="llava:7b",
+                name="LLaVA 7B (Vision Multimodal)",
+                provider="ollama",
+                size="4.5 GB",
+                parameters="7B",
+                capabilities=ModelCapability(
+                    vision=True,
+                    tools=False,
+                    context_length=4096,
+                    family="llava",
+                ),
+                is_available=False,
+                is_default=False,
+            ),
         ]
 
     async def stream_chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         context_window: int = 8192,

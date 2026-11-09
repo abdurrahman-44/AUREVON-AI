@@ -10,6 +10,8 @@ from backend.app.schemas.chat import ChatRequest
 from backend.app.repositories.conversation_repo import ConversationRepository
 from backend.app.repositories.message_repo import MessageRepository
 from backend.app.services.ai.factory import get_ai_provider
+from backend.app.services.documents.rag import RAGService
+from backend.app.services.memory.manager import MemoryManager
 from backend.app.api.deps import get_optional_user
 from backend.app.models.entities import User
 from backend.app.core.config import settings
@@ -63,8 +65,66 @@ async def chat_endpoint(
         for m in history_messages
     ]
 
-    # Ensure provider is instantiated
-    provider = get_ai_provider("ollama")
+    # 4. Context Enrichment: RAG Document Retrieval & Active Memory
+    system_additions = []
+    
+    # 4a. Check for relevant user memories
+    try:
+        memories = await MemoryManager.get_relevant_memories(db, payload.message, user_id=user_id)
+        if memories:
+            system_additions.append(MemoryManager.format_memory_context(memories))
+    except Exception as e:
+        logger.warning(f"Memory retrieval notice: {e}")
+
+    # 4b. Check for relevant document citations (RAG)
+    try:
+        rag_chunks = await RAGService.retrieve_relevant_chunks(db, payload.message, user_id=user_id)
+        if rag_chunks:
+            system_additions.append(RAGService.format_grounded_context(rag_chunks))
+    except Exception as e:
+        logger.warning(f"RAG retrieval notice: {e}")
+
+    if system_additions:
+        enriched_system_msg = {
+            "role": "system",
+            "content": "You are AUREVON AI. Ground your responses using the following user context:\n\n" + "\n\n".join(system_additions),
+        }
+        messages_payload.insert(0, enriched_system_msg)
+
+    # Resolve target provider based on model family
+    def resolve_provider_for_model(model_name: str) -> str:
+        m = model_name.lower()
+        if "gpt" in m or "o1" in m or "o3" in m:
+            return "openai"
+        if "groq" in m or "llama-3.3" in m:
+            return "groq"
+        if "deepseek" in m:
+            return "deepseek"
+        return "ollama"
+
+    def check_model_vision_capability(model_name: str) -> bool:
+        m = model_name.lower()
+        vision_indicators = ["vision", "vl", "llava", "4o", "gpt-4-turbo", "claude"]
+        return any(ind in m for ind in vision_indicators)
+
+    provider_name = resolve_provider_for_model(target_model)
+    provider = get_ai_provider(provider_name)
+
+    # Multimodal image handling & capability check
+    has_images = bool(payload.images and len(payload.images) > 0)
+    vision_supported = check_model_vision_capability(target_model)
+
+    if has_images and vision_supported:
+        # Attach images to the latest user message
+        if provider_name == "ollama":
+            messages_payload[-1]["images"] = payload.images
+        else:
+            # OpenAI / Cloud multimodal block format
+            content_blocks = [{"type": "text", "text": payload.message}]
+            for img in payload.images:
+                url = img if img.startswith("data:") else f"data:image/jpeg;base64,{img}"
+                content_blocks.append({"type": "image_url", "image_url": {"url": url}})
+            messages_payload[-1]["content"] = content_blocks
 
     async def sse_event_stream() -> AsyncGenerator[str, None]:
         # Send initial event with conversation ID and user message ID
@@ -76,6 +136,17 @@ async def chat_endpoint(
             "model": target_model,
         }
         yield f"data: {json.dumps(init_event)}\n\n"
+
+        # Check vision capability violation:
+        if has_images and not vision_supported:
+            warning_msg = (
+                f"⚠️ **Model Capability Notice**: The selected model `{target_model}` does not support image analysis. "
+                f"Multimodal vision requires a vision-compatible model such as `llava:7b`, `qwen2-vl`, or `gpt-4o`. "
+                f"Please switch to a vision model to inspect images."
+            )
+            yield f"data: {json.dumps({'conversation_id': conversation_id, 'delta': warning_msg, 'done': False})}\n\n"
+            yield f"data: {json.dumps({'conversation_id': conversation_id, 'delta': '', 'done': True, 'model': target_model})}\n\n"
+            return
 
         accumulated_text = []
 
