@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from backend.app.core.config import settings
 from backend.app.database.session import init_db
-from backend.app.api.routes import health, conversations, chat, models
+from backend.app.api.routes import health, conversations, chat, models, auth, settings as user_settings
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +50,8 @@ app.add_middleware(
 
 # Register API Routers
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(user_settings.router, prefix="/api")
 app.include_router(conversations.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(models.router, prefix="/api")

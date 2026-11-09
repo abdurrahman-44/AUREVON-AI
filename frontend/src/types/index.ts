@@ -1,3 +1,24 @@
+export interface UserSettings {
+  theme: string;
+  default_model: string;
+  memory_enabled: boolean;
+  other_preferences: Record<string, any>;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  created_at: string;
+  settings?: UserSettings;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -11,6 +32,7 @@ export interface Message {
 export interface Conversation {
   id: string;
   title: string;
+  user_id?: string;
   created_at: string;
   updated_at: string;
   message_count?: number;

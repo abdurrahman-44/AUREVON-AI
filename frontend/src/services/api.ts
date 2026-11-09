@@ -1,15 +1,84 @@
-import { Conversation, ConversationDetail, ModelInfo, SystemStatus } from '../types';
+import { Conversation, ConversationDetail, ModelInfo, SystemStatus, User, AuthResponse, UserSettings } from '../types';
 
 const API_BASE = '/api';
 
+function getAuthHeader(): Record<string, string> {
+  const token = localStorage.getItem('aurevon_token');
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
+// ----------------- Auth & Settings -----------------
+export async function registerUser(username: string, email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Registration failed');
+  }
+  return res.json();
+}
+
+export async function loginUser(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Login failed');
+  }
+  return res.json();
+}
+
+export async function fetchMe(): Promise<User> {
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error('Not authenticated');
+  return res.json();
+}
+
+export async function fetchUserSettings(): Promise<UserSettings> {
+  const res = await fetch(`${API_BASE}/settings`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error('Failed to fetch settings');
+  return res.json();
+}
+
+export async function updateUserSettings(settings: Partial<UserSettings>): Promise<UserSettings> {
+  const res = await fetch(`${API_BASE}/settings`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error('Failed to update settings');
+  return res.json();
+}
+
+// ----------------- Conversations -----------------
 export async function fetchConversations(): Promise<Conversation[]> {
-  const res = await fetch(`${API_BASE}/conversations`);
+  const res = await fetch(`${API_BASE}/conversations`, {
+    headers: { ...getAuthHeader() },
+  });
   if (!res.ok) throw new Error(`Failed to fetch conversations: ${res.statusText}`);
   return res.json();
 }
 
 export async function fetchConversation(id: string): Promise<ConversationDetail> {
-  const res = await fetch(`${API_BASE}/conversations/${id}`);
+  const res = await fetch(`${API_BASE}/conversations/${id}`, {
+    headers: { ...getAuthHeader() },
+  });
   if (!res.ok) throw new Error(`Failed to fetch conversation: ${res.statusText}`);
   return res.json();
 }
@@ -17,7 +86,10 @@ export async function fetchConversation(id: string): Promise<ConversationDetail>
 export async function createConversation(title?: string): Promise<Conversation> {
   const res = await fetch(`${API_BASE}/conversations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
     body: JSON.stringify({ title: title || 'New Conversation' }),
   });
   if (!res.ok) throw new Error(`Failed to create conversation: ${res.statusText}`);
@@ -27,7 +99,10 @@ export async function createConversation(title?: string): Promise<Conversation> 
 export async function updateConversationTitle(id: string, title: string): Promise<Conversation> {
   const res = await fetch(`${API_BASE}/conversations/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeader(),
+    },
     body: JSON.stringify({ title }),
   });
   if (!res.ok) throw new Error(`Failed to update conversation: ${res.statusText}`);
@@ -37,10 +112,12 @@ export async function updateConversationTitle(id: string, title: string): Promis
 export async function deleteConversation(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/conversations/${id}`, {
     method: 'DELETE',
+    headers: { ...getAuthHeader() },
   });
   if (!res.ok) throw new Error(`Failed to delete conversation: ${res.statusText}`);
 }
 
+// ----------------- System & Models -----------------
 export async function fetchModels(): Promise<ModelInfo[]> {
   const res = await fetch(`${API_BASE}/models`);
   if (!res.ok) throw new Error(`Failed to fetch models: ${res.statusText}`);
@@ -82,6 +159,7 @@ export async function streamChat({
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
+        ...getAuthHeader(),
       },
       body: JSON.stringify({
         conversation_id: conversationId,

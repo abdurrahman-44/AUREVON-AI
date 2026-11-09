@@ -12,8 +12,12 @@ import {
   Database,
   Cpu,
   RefreshCw,
+  Settings as SettingsIcon,
+  User as UserIcon,
+  LogOut,
+  LogIn,
 } from 'lucide-react';
-import { Conversation, SystemStatus } from '../../types';
+import { Conversation, SystemStatus, User } from '../../types';
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -26,6 +30,10 @@ interface SidebarProps {
   onRefreshHealth: () => void;
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
+  currentUser: User | null;
+  onOpenAuth: () => void;
+  onOpenSettings: () => void;
+  onLogout: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -39,6 +47,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRefreshHealth,
   isCollapsed,
   setIsCollapsed,
+  currentUser,
+  onOpenAuth,
+  onOpenSettings,
+  onLogout,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -97,17 +109,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Minimized status indicators */}
-        <div className="flex flex-col items-center gap-2">
+        {/* Minimized bottom controls */}
+        <div className="flex flex-col items-center gap-3">
+          <button
+            onClick={currentUser ? onOpenSettings : onOpenAuth}
+            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-white transition-colors"
+            title={currentUser ? currentUser.username : 'Sign In'}
+          >
+            <UserIcon size={18} />
+          </button>
           <div
             className={`w-2.5 h-2.5 rounded-full ${
               systemStatus?.database === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'
             }`}
             title={`Database: ${systemStatus?.database || 'unknown'}`}
-          />
-          <div
-            className={`w-2.5 h-2.5 rounded-full ${isOllamaHealthy ? 'bg-emerald-500' : 'bg-amber-500'}`}
-            title={`Ollama: ${ollamaProvider?.status || 'offline'}`}
           />
         </div>
       </aside>
@@ -246,51 +261,76 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* System Status Footer */}
-      <div className="p-3 border-t border-charcoal-800 bg-charcoal-900/80">
-        <div className="flex items-center justify-between text-[11px] text-charcoal-400 mb-2">
-          <span className="font-semibold uppercase tracking-wider">System Status</span>
+      {/* Footer Area: User Profile & Health */}
+      <div className="border-t border-charcoal-800 bg-charcoal-900/90 p-3 space-y-2.5">
+        {/* User Card */}
+        <div className="flex items-center justify-between px-2 py-1.5 rounded-xl bg-charcoal-800/60 border border-charcoal-700/60">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-brand-600/30 border border-brand-500/40 flex items-center justify-center text-brand-300 flex-shrink-0">
+              <UserIcon size={14} />
+            </div>
+            <div className="min-w-0">
+              <span className="block text-xs font-semibold text-white truncate">
+                {currentUser ? currentUser.username : 'Guest Mode'}
+              </span>
+              <span className="block text-[10px] text-charcoal-400 truncate">
+                {currentUser ? currentUser.email : 'Local Session'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            {currentUser ? (
+              <>
+                <button
+                  onClick={onOpenSettings}
+                  className="p-1.5 rounded-lg text-charcoal-400 hover:text-white hover:bg-charcoal-700 transition-colors"
+                  title="Settings"
+                >
+                  <SettingsIcon size={13} />
+                </button>
+                <button
+                  onClick={onLogout}
+                  className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-400 hover:bg-charcoal-700 transition-colors"
+                  title="Sign Out"
+                >
+                  <LogOut size={13} />
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={onOpenAuth}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-[11px] font-medium transition-colors"
+                title="Sign In / Register"
+              >
+                <LogIn size={11} />
+                <span>Sign In</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Runtime Diagnostics */}
+        <div className="flex items-center justify-between text-[11px] text-charcoal-400 px-1">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1">
+              <Database size={11} className="text-charcoal-500" />
+              <span className="text-[10px] text-emerald-400 font-mono">DB:OK</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <Cpu size={11} className="text-charcoal-500" />
+              <span className={`text-[10px] font-mono ${isOllamaHealthy ? 'text-emerald-400' : 'text-amber-400'}`}>
+                AI:{ollamaProvider?.status || 'offline'}
+              </span>
+            </span>
+          </div>
           <button
             onClick={onRefreshHealth}
-            className="hover:text-charcoal-200 p-0.5 transition-colors"
-            title="Refresh System Health"
+            className="hover:text-charcoal-200 transition-colors"
+            title="Refresh status"
           >
             <RefreshCw size={11} />
           </button>
-        </div>
-
-        <div className="space-y-1.5 text-xs">
-          <div className="flex items-center justify-between px-2 py-1 rounded bg-charcoal-800/50">
-            <span className="flex items-center gap-1.5 text-charcoal-300">
-              <Database size={12} className="text-charcoal-400" />
-              <span>Database</span>
-            </span>
-            <span
-              className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-medium ${
-                systemStatus?.database === 'connected'
-                  ? 'bg-emerald-500/20 text-emerald-400'
-                  : 'bg-rose-500/20 text-rose-400'
-              }`}
-            >
-              {systemStatus?.database || 'checking'}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between px-2 py-1 rounded bg-charcoal-800/50">
-            <span className="flex items-center gap-1.5 text-charcoal-300">
-              <Cpu size={12} className="text-charcoal-400" />
-              <span>Ollama AI</span>
-            </span>
-            <span
-              className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-medium ${
-                isOllamaHealthy
-                  ? 'bg-emerald-500/20 text-emerald-400'
-                  : 'bg-amber-500/20 text-amber-400'
-              }`}
-            >
-              {ollamaProvider?.status || 'offline'}
-            </span>
-          </div>
         </div>
       </div>
     </aside>

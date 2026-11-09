@@ -3,6 +3,8 @@ import { Sidebar } from './components/sidebar/Sidebar';
 import { ChatMessage } from './components/chat/ChatMessage';
 import { WelcomeScreen } from './components/chat/WelcomeScreen';
 import { Composer } from './components/composer/Composer';
+import { AuthModal } from './components/auth/AuthModal';
+import { SettingsModal } from './components/settings/SettingsModal';
 import {
   fetchConversations,
   fetchConversation,
@@ -10,9 +12,10 @@ import {
   deleteConversation,
   fetchModels,
   fetchSystemHealth,
+  fetchMe,
   streamChat,
 } from './services/api';
-import { Conversation, Message, ModelInfo, SystemStatus } from './types';
+import { Conversation, Message, ModelInfo, SystemStatus, User, UserSettings } from './types';
 
 export const App: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -26,15 +29,56 @@ export const App: React.FC = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+  // Phase 2: User Accounts & Settings State
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Initial load: Fetch conversations, models, and health status
+  // Initial load
   useEffect(() => {
     loadInitialData();
   }, []);
 
+  // Theme application
+  useEffect(() => {
+    const activeTheme = userSettings?.theme || 'dark';
+    if (activeTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    } else if (activeTheme === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    } else {
+      // System mode
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.classList.toggle('dark', prefersDark);
+    }
+  }, [userSettings?.theme]);
+
   const loadInitialData = async () => {
+    // 1. Try restoring user session if token exists
+    const token = localStorage.getItem('aurevon_token');
+    if (token) {
+      try {
+        const user = await fetchMe();
+        setCurrentUser(user);
+        if (user.settings) {
+          setUserSettings(user.settings);
+          if (user.settings.default_model) {
+            setSelectedModel(user.settings.default_model);
+          }
+        }
+      } catch (e) {
+        console.warn('Session expired or invalid token:', e);
+        localStorage.removeItem('aurevon_token');
+      }
+    }
+
+    // 2. Fetch conversations, models, and health
     try {
       const [convs, modelList, health] = await Promise.all([
         fetchConversations(),
@@ -47,18 +91,49 @@ export const App: React.FC = () => {
       setSystemStatus(health);
 
       const defaultM = modelList.find((m) => m.is_default) || modelList[0];
-      if (defaultM) setSelectedModel(defaultM.id);
+      if (defaultM && !userSettings?.default_model) {
+        setSelectedModel(defaultM.id);
+      }
     } catch (err) {
       console.error('Error loading initial data:', err);
     }
   };
 
+  const handleAuthSuccess = async (user: User, token: string) => {
+    localStorage.setItem('aurevon_token', token);
+    setCurrentUser(user);
+    if (user.settings) {
+      setUserSettings(user.settings);
+      if (user.settings.default_model) {
+        setSelectedModel(user.settings.default_model);
+      }
+    }
+    // Reload user-scoped conversations
+    try {
+      const convs = await fetchConversations();
+      setConversations(convs);
+    } catch (e) {
+      console.error('Failed to reload conversations:', e);
+    }
+  };
+
+  const handleLogout = async () => {
+    localStorage.removeItem('aurevon_token');
+    setCurrentUser(null);
+    setUserSettings(null);
+    handleNewChat();
+    // Reload guest/unassigned conversations
+    try {
+      const convs = await fetchConversations();
+      setConversations(convs);
+    } catch (e) {
+      console.error('Failed to reload conversations:', e);
+    }
+  };
+
   const handleRefreshHealth = async () => {
     try {
-      const [health, modelList] = await Promise.all([
-        fetchSystemHealth(),
-        fetchModels(),
-      ]);
+      const [health, modelList] = await Promise.all([fetchSystemHealth(), fetchModels()]);
       setSystemStatus(health);
       setModels(modelList);
     } catch (e) {
@@ -230,6 +305,10 @@ export const App: React.FC = () => {
         onRefreshHealth={handleRefreshHealth}
         isCollapsed={isSidebarCollapsed}
         setIsCollapsed={setIsSidebarCollapsed}
+        currentUser={currentUser}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main Chat Viewport */}
@@ -280,6 +359,26 @@ export const App: React.FC = () => {
           />
         </div>
       </main>
+
+      {/* Phase 2: Modals */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={handleAuthSuccess}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        settings={userSettings}
+        onUpdateSettings={(newSettings) => {
+          setUserSettings(newSettings);
+          if (newSettings.default_model) {
+            setSelectedModel(newSettings.default_model);
+          }
+        }}
+        models={models}
+      />
     </div>
   );
 };

@@ -1,7 +1,9 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.database.session import get_db
+from backend.app.api.deps import get_optional_user
+from backend.app.models.entities import User
 from backend.app.repositories.conversation_repo import ConversationRepository
 from backend.app.repositories.message_repo import MessageRepository
 from backend.app.schemas.conversation import (
@@ -19,10 +21,12 @@ router = APIRouter(prefix="/conversations", tags=["Conversations"])
 async def list_conversations(
     limit: int = 50,
     offset: int = 0,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     repo = ConversationRepository(db)
-    convs = await repo.list_conversations(limit=limit, offset=offset)
+    user_id = current_user.id if current_user else None
+    convs = await repo.list_conversations(user_id=user_id, limit=limit, offset=offset)
     
     results = []
     for c in convs:
@@ -45,10 +49,12 @@ async def list_conversations(
 @router.post("", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
     payload: ConversationCreate,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     repo = ConversationRepository(db)
-    conv = await repo.create(title=payload.title or "New Conversation")
+    user_id = current_user.id if current_user else None
+    conv = await repo.create(title=payload.title or "New Conversation", user_id=user_id)
     return ConversationResponse(
         id=conv.id,
         user_id=conv.user_id,

@@ -13,7 +13,7 @@ class OllamaProvider(BaseAIProvider):
     def __init__(self, base_url: Optional[str] = None):
         super().__init__(name="ollama")
         self.base_url = (base_url or settings.OLLAMA_BASE_URL).rstrip("/")
-        self.timeout = httpx.Timeout(connect=5.0, read=120.0, write=10.0, pool=10.0)
+        self.timeout = httpx.Timeout(connect=1.5, read=120.0, write=5.0, pool=5.0)
 
     async def check_health(self) -> ProviderHealth:
         try:

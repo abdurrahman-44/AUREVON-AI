@@ -30,14 +30,16 @@ class ConversationRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
-    async def list_conversations(self, limit: int = 50, offset: int = 0) -> List[Conversation]:
-        query = (
-            select(Conversation)
-            .options(selectinload(Conversation.messages))
-            .order_by(desc(Conversation.updated_at))
-            .offset(offset)
-            .limit(limit)
-        )
+    async def list_conversations(
+        self,
+        user_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Conversation]:
+        query = select(Conversation).options(selectinload(Conversation.messages))
+        if user_id:
+            query = query.where(Conversation.user_id == user_id)
+        query = query.order_by(desc(Conversation.updated_at)).offset(offset).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

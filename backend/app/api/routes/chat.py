@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,8 @@ from backend.app.schemas.chat import ChatRequest
 from backend.app.repositories.conversation_repo import ConversationRepository
 from backend.app.repositories.message_repo import MessageRepository
 from backend.app.services.ai.factory import get_ai_provider
+from backend.app.api.deps import get_optional_user
+from backend.app.models.entities import User
 from backend.app.core.config import settings
 
 logger = logging.getLogger("aurevon.api.chat")
@@ -26,6 +28,7 @@ def generate_title_from_prompt(prompt: str) -> str:
 @router.post("")
 async def chat_endpoint(
     payload: ChatRequest,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     conv_repo = ConversationRepository(db)
@@ -33,13 +36,14 @@ async def chat_endpoint(
 
     # 1. Resolve or create conversation
     conversation = None
+    user_id = current_user.id if current_user else None
     if payload.conversation_id:
         conversation = await conv_repo.get_by_id(payload.conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
     else:
         title = generate_title_from_prompt(payload.message)
-        conversation = await conv_repo.create(title=title)
+        conversation = await conv_repo.create(title=title, user_id=user_id)
 
     conversation_id = conversation.id
     target_model = payload.model or settings.DEFAULT_MODEL
