@@ -75,12 +75,4 @@ class WebSearchService:
             except Exception:
                 pass
 
-        # Fallback simulated verified search result if completely offline / blocked
-        if not results:
-            results.append({
-                "title": f"Search Knowledge: {query}",
-                "snippet": f"Verified factual data and research references for query: '{query}'. Open-source documentation and technical specifications.",
-                "url": f"https://duckduckgo.com/?q={urllib.parse.quote(query)}",
-            })
-
         return results[:max_results]

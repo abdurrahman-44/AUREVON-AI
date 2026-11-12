@@ -1,4 +1,5 @@
 import os
+import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy import select
@@ -6,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.database.session import get_db
-from backend.app.api.deps import get_optional_user
+from backend.app.api.deps import get_optional_user, assert_resource_ownership
 from backend.app.models.entities import Document, DocumentChunk, User
 from backend.app.schemas.document import (
     DocumentResponse,
@@ -19,6 +20,7 @@ from backend.app.services.documents.chunker import TextChunker
 from backend.app.services.documents.embeddings import EmbeddingService
 from backend.app.services.documents.rag import RAGService
 from backend.app.core.config import settings
+from backend.app.core.rate_limit import rate_limit_dependency
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -26,13 +28,19 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv", ".json", ".py", ".
 MAX_FILE_BYTES = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 
-@router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/upload",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_dependency("upload", lambda: settings.RATE_LIMIT_UPLOAD_PER_MINUTE))],
+)
 async def upload_document(
     file: UploadFile = File(...),
     current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    filename = file.filename or "uploaded_file"
+    raw_name = file.filename or "uploaded_file"
+    filename = os.path.basename(raw_name).replace("..", "") or "uploaded_file"
     ext = os.path.splitext(filename)[1].lower()
 
     if ext not in ALLOWED_EXTENSIONS:
@@ -50,9 +58,10 @@ async def upload_document(
             detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_MB} MB",
         )
 
-    # Ensure upload directory exists
+    # Ensure upload directory exists and avoid filename collisions / traversal
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    storage_path = os.path.join(settings.UPLOAD_DIR, f"{filename}")
+    unique_name = f"{uuid.uuid4().hex}_{filename}"
+    storage_path = os.path.join(settings.UPLOAD_DIR, unique_name)
 
     # Save to disk
     with open(storage_path, "wb") as f:
@@ -112,6 +121,8 @@ async def list_documents(
     stmt = select(Document)
     if current_user:
         stmt = stmt.where(Document.user_id == current_user.id)
+    else:
+        stmt = stmt.where(Document.user_id.is_(None))
     stmt = stmt.order_by(Document.created_at.desc())
     res = await db.execute(stmt)
     return list(res.scalars().all())
@@ -120,6 +131,7 @@ async def list_documents(
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: str,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Document).where(Document.id == document_id)
@@ -127,12 +139,14 @@ async def get_document(
     doc = res.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    assert_resource_ownership(doc.user_id, current_user, "document")
     return doc
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: str,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Document).where(Document.id == document_id)
@@ -140,6 +154,7 @@ async def delete_document(
     doc = res.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    assert_resource_ownership(doc.user_id, current_user, "document")
 
     if os.path.exists(doc.storage_path):
         try:

@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.database.session import get_db
-from backend.app.api.deps import get_optional_user
+from backend.app.api.deps import get_optional_user, assert_resource_ownership
 from backend.app.models.entities import User
 from backend.app.repositories.conversation_repo import ConversationRepository
 from backend.app.repositories.message_repo import MessageRepository
@@ -69,12 +69,14 @@ async def create_conversation(
 @router.get("/{conversation_id}", response_model=ConversationDetailResponse)
 async def get_conversation(
     conversation_id: str,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     repo = ConversationRepository(db)
     conv = await repo.get_by_id(conversation_id, load_messages=True)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    assert_resource_ownership(conv.user_id, current_user, "conversation")
     
     messages = [
         MessageResponse(
@@ -102,12 +104,14 @@ async def get_conversation(
 async def get_conversation_messages(
     conversation_id: str,
     limit: int = 100,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     repo = ConversationRepository(db)
     conv = await repo.get_by_id(conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    assert_resource_ownership(conv.user_id, current_user, "conversation")
     
     msg_repo = MessageRepository(db)
     messages = await msg_repo.get_messages_for_conversation(conversation_id, limit=limit)
@@ -129,11 +133,16 @@ async def get_conversation_messages(
 async def update_conversation(
     conversation_id: str,
     payload: ConversationUpdate,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     if not payload.title:
         raise HTTPException(status_code=400, detail="Title cannot be empty")
     repo = ConversationRepository(db)
+    existing = await repo.get_by_id(conversation_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    assert_resource_ownership(existing.user_id, current_user, "conversation")
     conv = await repo.update_title(conversation_id, payload.title.strip())
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -149,9 +158,14 @@ async def update_conversation(
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(
     conversation_id: str,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     repo = ConversationRepository(db)
+    existing = await repo.get_by_id(conversation_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    assert_resource_ownership(existing.user_id, current_user, "conversation")
     success = await repo.delete(conversation_id)
     if not success:
         raise HTTPException(status_code=404, detail="Conversation not found")

@@ -36,7 +36,12 @@ frontend/.vite/
 
 # Database & Local Storage
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite3
+tsconfig.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
 storage/uploads/
 storage/vectors/
 
@@ -44,6 +49,8 @@ storage/vectors/
 .env
 .env.*
 !.env.example
+!.env.production.example
+!backend/.env.example
 
 # IDE & OS
 .vscode/

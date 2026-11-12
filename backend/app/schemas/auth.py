@@ -9,9 +9,20 @@ class UserRegisterRequest(BaseModel):
     password: str = Field(..., min_length=6, max_length=128)
 
 
+class OwnerBootstrapRequest(UserRegisterRequest):
+    bootstrap_token: Optional[str] = Field(None, description="Required when ADMIN_BOOTSTRAP_TOKEN is configured")
+
+
+class BootstrapStatusResponse(BaseModel):
+    owner_exists: bool
+    requires_bootstrap_token: bool
+    web_bootstrap_allowed: bool
+
+
 class UserLoginRequest(BaseModel):
     email: str = Field(..., description="Email address or username")
     password: str = Field(..., min_length=1)
+    totp_code: Optional[str] = Field(None, description="6-digit 2FA authenticator code when enabled")
 
 
 class UserSettingsResponse(BaseModel):
@@ -34,6 +45,10 @@ class UserResponse(BaseModel):
     id: str
     username: str
     email: str
+    role: str = "user"
+    is_active: bool = True
+    totp_enabled: bool = False
+    last_active_at: Optional[datetime] = None
     created_at: datetime
     settings: Optional[UserSettingsResponse] = None
 

@@ -100,23 +100,34 @@ class OpenAICompatibleProvider(BaseAIProvider):
             logger.warning(f"Could not fetch models for {self.name}: {e}")
         return []
 
-    async def stream_chat(
+    async def stream_chat_with_metrics(
         self,
         messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         context_window: int = 8192,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         if not self.api_key:
-            yield f"**Provider Error**: `{self.name}` requires an API key. Please configure your API key in Model Settings."
+            yield {
+                "type": "error",
+                "error_category": "missing_api_key",
+                "error_message": f"{self.name} API key is not configured",
+                "user_message": f"**Provider Error**: `{self.name}` is not configured on the server. Contact the platform administrator.",
+            }
             return
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
             "stream": True,
         }
+        if self.name in ("openai", "groq"):
+            payload["stream_options"] = {"include_usage": True}
+
+        prompt_tokens: Optional[int] = None
+        completion_tokens: Optional[int] = None
+        total_tokens: Optional[int] = None
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -127,8 +138,13 @@ class OpenAICompatibleProvider(BaseAIProvider):
                     json=payload,
                 ) as response:
                     if response.status_code != 200:
-                        err = await response.aread()
-                        yield f"**API Error ({response.status_code})**: {err.decode('utf-8', errors='ignore')}"
+                        err = (await response.aread()).decode("utf-8", errors="ignore")
+                        yield {
+                            "type": "error",
+                            "error_category": f"http_{response.status_code}",
+                            "error_message": f"{self.name} HTTP {response.status_code}: {err[:180]}",
+                            "user_message": f"**Provider Error ({response.status_code})**: Unable to generate response from `{self.name}`.",
+                        }
                         return
 
                     async for line in response.aiter_lines():
@@ -140,16 +156,60 @@ class OpenAICompatibleProvider(BaseAIProvider):
                             break
                         try:
                             parsed = json.loads(data_part)
+                            usage = parsed.get("usage") or parsed.get("x_groq", {}).get("usage")
+                            if isinstance(usage, dict):
+                                if isinstance(usage.get("prompt_tokens"), int):
+                                    prompt_tokens = usage["prompt_tokens"]
+                                if isinstance(usage.get("completion_tokens"), int):
+                                    completion_tokens = usage["completion_tokens"]
+                                if isinstance(usage.get("total_tokens"), int):
+                                    total_tokens = usage["total_tokens"]
+
                             choices = parsed.get("choices", [])
                             if choices:
                                 delta = choices[0].get("delta", {}).get("content", "")
                                 if delta:
-                                    yield delta
+                                    yield {"type": "token", "text": delta}
                         except json.JSONDecodeError:
                             continue
+
+            if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+                total_tokens = prompt_tokens + completion_tokens
+
+            yield {
+                "type": "done",
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            }
+        except httpx.TimeoutException:
+            yield {
+                "type": "error",
+                "error_category": "timeout",
+                "error_message": f"{self.name} request timed out",
+                "user_message": f"\n\n**Provider Timeout**: `{self.name}` timed out while generating a response.",
+            }
         except Exception as e:
             logger.exception("Error in OpenAI-compatible stream_chat")
-            yield f"\n\n**Provider Connection Error**: `{str(e)}`"
+            yield {
+                "type": "error",
+                "error_category": "connection_error",
+                "error_message": f"{self.name}: {str(e)[:180]}",
+                "user_message": f"\n\n**Provider Connection Error**: Unable to reach `{self.name}`.",
+            }
+
+    async def stream_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        temperature: float = 0.7,
+        context_window: int = 8192,
+    ) -> AsyncGenerator[str, None]:
+        async for event in self.stream_chat_with_metrics(messages, model, temperature, context_window):
+            if event["type"] == "token":
+                yield event["text"]
+            elif event["type"] == "error":
+                yield event["user_message"]
 
     async def complete_chat(
         self,

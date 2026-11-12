@@ -24,7 +24,7 @@ async def get_system_health(db: AsyncSession = Depends(get_db)):
 
     return SystemStatusResponse(
         app_name=settings.APP_NAME,
-        version="0.1.0",
+        version=settings.APP_VERSION,
         database=db_status,
         providers=[ollama_health],
     )

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { ChatMessage } from './components/chat/ChatMessage';
 import { WelcomeScreen } from './components/chat/WelcomeScreen';
@@ -10,19 +10,31 @@ import { DocumentsModal } from './components/documents/DocumentsModal';
 import { MemoryModal } from './components/memory/MemoryModal';
 import { ResearchModal } from './components/research/ResearchModal';
 import { AgentModal } from './components/agents/AgentModal';
+import { AdminConsole } from './components/admin/AdminConsole';
 import {
-  fetchConversations,
-  fetchConversation,
-  updateConversationTitle,
   deleteConversation,
-  fetchModels,
-  fetchSystemHealth,
+  fetchConversation,
+  fetchConversations,
   fetchMe,
+  fetchModels,
+  fetchPublicIntelligence,
+  fetchSystemHealth,
+  logoutUser,
   streamChat,
+  updateConversationTitle,
 } from './services/api';
-import { Conversation, Message, ModelInfo, SystemStatus, User, UserSettings } from './types';
+import {
+  Conversation,
+  Message,
+  ModelInfo,
+  PublicIntelligenceConfig,
+  SystemStatus,
+  User,
+  UserSettings,
+} from './types';
 
 export const App: React.FC = () => {
+  const [routePath, setRoutePath] = useState<string>(() => window.location.pathname || '/');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -31,17 +43,20 @@ export const App: React.FC = () => {
   const [streamingContent, setStreamingContent] = useState('');
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('qwen2.5:3b');
+  const [publicIntelligence, setPublicIntelligence] = useState<PublicIntelligenceConfig | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
-  // User Accounts & Settings State
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('aurevon_theme');
+    return saved === 'light' ? 'light' : 'dark';
+  });
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
-
-  // Intelligence Ecosystem Modals State
   const [isDocumentsModalOpen, setIsDocumentsModalOpen] = useState(false);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
   const [isResearchModalOpen, setIsResearchModalOpen] = useState(false);
@@ -50,61 +65,84 @@ export const App: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Initial load
+  const navigate = (path: string) => {
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setRoutePath(path);
+  };
+
+  useEffect(() => {
+    const handlePop = () => setRoutePath(window.location.pathname || '/');
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, []);
+
   useEffect(() => {
     loadInitialData();
   }, []);
 
-  // Theme application
   useEffect(() => {
-    const activeTheme = userSettings?.theme || 'dark';
-    if (activeTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-      document.documentElement.classList.remove('light');
-    } else if (activeTheme === 'light') {
-      document.documentElement.classList.add('light');
-      document.documentElement.classList.remove('dark');
-    } else {
-      // System mode
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.classList.toggle('dark', prefersDark);
+    const prefTheme = userSettings?.theme;
+    let resolved: 'light' | 'dark' = theme;
+    if (prefTheme === 'light' || prefTheme === 'dark') {
+      resolved = prefTheme;
+    } else if (prefTheme === 'system') {
+      resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
-  }, [userSettings?.theme]);
+    document.documentElement.classList.toggle('dark', resolved === 'dark');
+    document.documentElement.classList.toggle('light', resolved === 'light');
+  }, [theme, userSettings?.theme]);
+
+  const handleToggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    localStorage.setItem('aurevon_theme', next);
+    if (userSettings) {
+      setUserSettings({ ...userSettings, theme: next });
+    }
+  };
 
   const loadInitialData = async () => {
-    // 1. Try restoring user session if token exists
+    let loadedSettings: UserSettings | null = null;
     const token = localStorage.getItem('aurevon_token');
     if (token) {
       try {
         const user = await fetchMe();
         setCurrentUser(user);
         if (user.settings) {
+          loadedSettings = user.settings;
           setUserSettings(user.settings);
-          if (user.settings.default_model) {
-            setSelectedModel(user.settings.default_model);
+          if (user.settings.theme === 'light' || user.settings.theme === 'dark') {
+            setTheme(user.settings.theme);
           }
         }
-      } catch (e) {
-        console.warn('Session expired or invalid token:', e);
+      } catch {
         localStorage.removeItem('aurevon_token');
+        setCurrentUser(null);
       }
     }
 
-    // 2. Fetch conversations, models, and health
     try {
-      const [convs, modelList, health] = await Promise.all([
-        fetchConversations(),
-        fetchModels(),
-        fetchSystemHealth(),
+      const [convs, modelList, health, pubIntel] = await Promise.all([
+        fetchConversations().catch(() => []),
+        fetchModels().catch(() => []),
+        fetchSystemHealth().catch(() => null),
+        fetchPublicIntelligence().catch(() => null),
       ]);
 
       setConversations(convs);
       setModels(modelList);
-      setSystemStatus(health);
-
-      const defaultM = modelList.find((m) => m.is_default) || modelList[0];
-      if (defaultM && !userSettings?.default_model) {
-        setSelectedModel(defaultM.id);
+      if (health) setSystemStatus(health);
+      if (pubIntel) {
+        setPublicIntelligence(pubIntel);
+        if (!pubIntel.allow_user_model_switching) {
+          setSelectedModel(pubIntel.active_model);
+        } else if (loadedSettings?.default_model) {
+          setSelectedModel(loadedSettings.default_model);
+        } else {
+          setSelectedModel(pubIntel.active_model);
+        }
       }
     } catch (err) {
       console.error('Error loading initial data:', err);
@@ -116,28 +154,35 @@ export const App: React.FC = () => {
     setCurrentUser(user);
     if (user.settings) {
       setUserSettings(user.settings);
-      if (user.settings.default_model) {
+      if (user.settings.theme === 'light' || user.settings.theme === 'dark') {
+        setTheme(user.settings.theme);
+      }
+      if (publicIntelligence?.allow_user_model_switching && user.settings.default_model) {
         setSelectedModel(user.settings.default_model);
       }
     }
-    // Reload user-scoped conversations
     try {
       const convs = await fetchConversations();
       setConversations(convs);
+      setActiveConversationId(null);
+      setMessages([]);
     } catch (e) {
       console.error('Failed to reload conversations:', e);
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logoutUser();
     localStorage.removeItem('aurevon_token');
     setCurrentUser(null);
     setUserSettings(null);
     handleNewChat();
+    if (routePath.startsWith('/admin')) {
+      navigate('/');
+    }
     loadInitialData();
   };
 
-  // Switch conversation
   const handleSelectConversation = async (id: string) => {
     if (activeConversationId === id) return;
     try {
@@ -150,7 +195,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // Start new conversation
   const handleNewChat = () => {
     setActiveConversationId(null);
     setMessages([]);
@@ -161,18 +205,24 @@ export const App: React.FC = () => {
     }
   };
 
-  // Refresh runtime health
   const handleRefreshHealth = async () => {
     try {
-      const [h, modelList] = await Promise.all([fetchSystemHealth(), fetchModels()]);
+      const [h, modelList, pubIntel] = await Promise.all([
+        fetchSystemHealth(),
+        fetchModels(),
+        fetchPublicIntelligence(),
+      ]);
       setSystemStatus(h);
       setModels(modelList);
+      setPublicIntelligence(pubIntel);
+      if (!pubIntel.allow_user_model_switching) {
+        setSelectedModel(pubIntel.active_model);
+      }
     } catch (err) {
       console.error('Failed to refresh health:', err);
     }
   };
 
-  // Rename conversation
   const handleRename = async (id: string, newTitle: string) => {
     try {
       const updated = await updateConversationTitle(id, newTitle);
@@ -184,7 +234,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // Delete conversation
   const handleDelete = async (id: string) => {
     try {
       await deleteConversation(id);
@@ -197,16 +246,10 @@ export const App: React.FC = () => {
     }
   };
 
-  // Auto scroll to bottom
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Send message and stream AI response (multimodal capable)
   const handleSend = async (customPrompt?: string, images?: string[]) => {
     const promptToSend = (customPrompt !== undefined ? customPrompt : input).trim();
     if ((!promptToSend && (!images || images.length === 0)) || isStreaming) return;
@@ -230,18 +273,23 @@ export const App: React.FC = () => {
 
     let currentConversationId = activeConversationId;
     let accumulated = '';
+    let resolvedModel = selectedModel;
 
     try {
       await streamChat({
         conversationId: activeConversationId || undefined,
         message: promptToSend || 'Explain this image',
         model: selectedModel,
-        images: images,
+        images,
         abortSignal: controller.signal,
         onInit: (data) => {
           if (!currentConversationId && data.conversation_id) {
             currentConversationId = data.conversation_id;
             setActiveConversationId(data.conversation_id);
+          }
+          if (data.model) {
+            resolvedModel = data.model;
+            setSelectedModel(data.model);
           }
         },
         onChunk: (delta) => {
@@ -255,24 +303,32 @@ export const App: React.FC = () => {
             conversation_id: data.conversation_id,
             role: 'assistant',
             content: accumulated,
-            model: selectedModel,
+            model: data.model || resolvedModel,
+            token_usage: data.token_usage || null,
             created_at: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, finalAssistantMsg]);
           setStreamingContent('');
 
-          // Refresh conversation list to get updated titles and ordering
           const updatedConvs = await fetchConversations();
           setConversations(updatedConvs);
         },
         onError: (err) => {
-          console.error('Stream failed:', err);
           setIsStreaming(false);
           setStreamingContent('');
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `err-${Date.now()}`,
+              conversation_id: currentConversationId || '',
+              role: 'assistant',
+              content: `**Request failed**: ${err.message}`,
+              created_at: new Date().toISOString(),
+            },
+          ]);
         },
       });
-    } catch (err) {
-      console.error('Error during send:', err);
+    } catch {
       setIsStreaming(false);
       setStreamingContent('');
     }
@@ -284,23 +340,45 @@ export const App: React.FC = () => {
       abortControllerRef.current = null;
     }
     if (streamingContent) {
-      const truncatedMsg: Message = {
-        id: `asst-stop-${Date.now()}`,
-        conversation_id: activeConversationId || '',
-        role: 'assistant',
-        content: streamingContent + ' *(Generation stopped by user)*',
-        model: selectedModel,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, truncatedMsg]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `asst-stop-${Date.now()}`,
+          conversation_id: activeConversationId || '',
+          role: 'assistant',
+          content: streamingContent + ' *(Stopped)*',
+          model: selectedModel,
+          created_at: new Date().toISOString(),
+        },
+      ]);
     }
     setIsStreaming(false);
     setStreamingContent('');
   };
 
+  if (routePath.startsWith('/admin')) {
+    return (
+      <AdminConsole
+        currentUser={currentUser}
+        routePath={routePath}
+        onNavigate={navigate}
+        onAuthSuccess={handleAuthSuccess}
+        onExitAdmin={() => {
+          navigate('/');
+          handleRefreshHealth();
+        }}
+        onLogout={handleLogout}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+      />
+    );
+  }
+
+  const allowSwitching = Boolean(publicIntelligence?.allow_user_model_switching);
+  const isOwner = currentUser?.role === 'owner';
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-charcoal-950 text-charcoal-100">
-      {/* Sidebar */}
+    <div className="flex h-screen w-screen overflow-hidden bg-canvas text-ink">
       <Sidebar
         conversations={conversations}
         activeConversationId={activeConversationId}
@@ -320,24 +398,21 @@ export const App: React.FC = () => {
         onOpenMemory={() => setIsMemoryModalOpen(true)}
         onOpenResearch={() => setIsResearchModalOpen(true)}
         onOpenAgents={() => setIsAgentModalOpen(true)}
+        onOpenAdmin={isOwner ? () => navigate('/admin') : undefined}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
       />
 
-      {/* Main Chat Viewport */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        {/* Messages Scroll Area */}
+      <main className="flex-1 flex flex-col h-full overflow-hidden bg-canvas">
         <div className="flex-1 overflow-y-auto">
           {messages.length === 0 && !isStreaming ? (
-            <WelcomeScreen
-              onSelectPrompt={(p) => handleSend(p)}
-              selectedModel={selectedModel}
-            />
+            <WelcomeScreen onSelectPrompt={(p) => handleSend(p)} selectedModel={selectedModel} />
           ) : (
-            <div className="max-w-4xl mx-auto py-4">
+            <div className="max-w-3xl mx-auto py-6">
               {messages.map((msg) => (
                 <ChatMessage key={msg.id} message={msg} />
               ))}
 
-              {/* In-flight streaming response chunk */}
               {isStreaming && (
                 <ChatMessage
                   message={{
@@ -356,8 +431,7 @@ export const App: React.FC = () => {
           )}
         </div>
 
-        {/* Composer Bar */}
-        <div className="border-t border-charcoal-800/80 bg-charcoal-950/80 backdrop-blur-md">
+        <div className="bg-canvas/90 backdrop-blur-sm">
           <Composer
             input={input}
             setInput={setInput}
@@ -367,12 +441,13 @@ export const App: React.FC = () => {
             selectedModel={selectedModel}
             models={models}
             onSelectModel={setSelectedModel}
+            allowModelSwitching={allowSwitching}
+            canManageModels={isOwner || allowSwitching}
             onOpenModelManagement={() => setIsModelModalOpen(true)}
           />
         </div>
       </main>
 
-      {/* Modals Suite */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
@@ -385,11 +460,16 @@ export const App: React.FC = () => {
         settings={userSettings}
         onUpdateSettings={(newSettings) => {
           setUserSettings(newSettings);
-          if (newSettings.default_model) {
+          if (newSettings.theme === 'light' || newSettings.theme === 'dark') {
+            setTheme(newSettings.theme);
+          }
+          if (allowSwitching && newSettings.default_model) {
             setSelectedModel(newSettings.default_model);
           }
         }}
         models={models}
+        allowModelSwitching={allowSwitching}
+        serverPinnedModel={publicIntelligence?.active_model || selectedModel}
       />
 
       <ModelManagementModal
@@ -398,27 +478,13 @@ export const App: React.FC = () => {
         models={models}
         providerHealths={systemStatus?.providers || []}
         onRefresh={handleRefreshHealth}
+        isOwner={isOwner}
       />
 
-      <DocumentsModal
-        isOpen={isDocumentsModalOpen}
-        onClose={() => setIsDocumentsModalOpen(false)}
-      />
-
-      <MemoryModal
-        isOpen={isMemoryModalOpen}
-        onClose={() => setIsMemoryModalOpen(false)}
-      />
-
-      <ResearchModal
-        isOpen={isResearchModalOpen}
-        onClose={() => setIsResearchModalOpen(false)}
-      />
-
-      <AgentModal
-        isOpen={isAgentModalOpen}
-        onClose={() => setIsAgentModalOpen(false)}
-      />
+      <DocumentsModal isOpen={isDocumentsModalOpen} onClose={() => setIsDocumentsModalOpen(false)} />
+      <MemoryModal isOpen={isMemoryModalOpen} onClose={() => setIsMemoryModalOpen(false)} />
+      <ResearchModal isOpen={isResearchModalOpen} onClose={() => setIsResearchModalOpen(false)} />
+      <AgentModal isOpen={isAgentModalOpen} onClose={() => setIsAgentModalOpen(false)} />
     </div>
   );
 };

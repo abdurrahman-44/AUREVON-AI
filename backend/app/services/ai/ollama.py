@@ -78,7 +78,7 @@ class OllamaProvider(BaseAIProvider):
                                     family=family,
                                 ),
                                 is_available=True,
-                                is_default=(name == settings.DEFAULT_MODEL or name.startswith("qwen")),
+                                is_default=(name == settings.DEFAULT_MODEL),
                             )
                         )
                     if models:
@@ -150,13 +150,13 @@ class OllamaProvider(BaseAIProvider):
             ),
         ]
 
-    async def stream_chat(
+    async def stream_chat_with_metrics(
         self,
         messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         context_window: int = 8192,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         payload = {
             "model": model or settings.DEFAULT_MODEL,
             "messages": messages,
@@ -167,6 +167,9 @@ class OllamaProvider(BaseAIProvider):
             },
         }
 
+        prompt_tokens: Optional[int] = None
+        completion_tokens: Optional[int] = None
+
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 async with client.stream(
@@ -176,9 +179,19 @@ class OllamaProvider(BaseAIProvider):
                     headers={"Content-Type": "application/json"},
                 ) as response:
                     if response.status_code != 200:
-                        err_text = await response.aread()
-                        logger.error(f"Ollama stream error status {response.status_code}: {err_text.decode('utf-8', errors='ignore')}")
-                        yield f"**Provider Error (HTTP {response.status_code})**: Ollama returned an error: `{err_text.decode('utf-8', errors='ignore')}`.\n\n*Make sure the model `{payload['model']}` is pulled via `ollama run {payload['model']}`.*"
+                        err_raw = await response.aread()
+                        err_decoded = err_raw.decode("utf-8", errors="ignore")
+                        logger.error(f"Ollama stream error status {response.status_code}: {err_decoded}")
+                        user_msg = (
+                            f"**Provider Error (HTTP {response.status_code})**: Ollama returned an error: "
+                            f"`{err_decoded}`.\n\n*Make sure the model `{payload['model']}` is available in Ollama.*"
+                        )
+                        yield {
+                            "type": "error",
+                            "error_category": f"http_{response.status_code}",
+                            "error_message": f"Ollama HTTP {response.status_code}: {err_decoded[:180]}",
+                            "user_message": user_msg,
+                        }
                         return
 
                     async for line in response.aiter_lines():
@@ -186,33 +199,83 @@ class OllamaProvider(BaseAIProvider):
                             continue
                         try:
                             chunk_data = json.loads(line)
+                            if chunk_data.get("error"):
+                                err_str = str(chunk_data["error"])
+                                yield {
+                                    "type": "error",
+                                    "error_category": "provider_stream_error",
+                                    "error_message": err_str[:200],
+                                    "user_message": f"**Provider Error**: {err_str}",
+                                }
+                                return
+
                             message_obj = chunk_data.get("message", {})
                             content_piece = message_obj.get("content", "")
                             if content_piece:
-                                yield content_piece
+                                yield {"type": "token", "text": content_piece}
+
                             if chunk_data.get("done", False):
+                                raw_prompt = chunk_data.get("prompt_eval_count")
+                                raw_eval = chunk_data.get("eval_count")
+                                prompt_tokens = int(raw_prompt) if isinstance(raw_prompt, int) else None
+                                completion_tokens = int(raw_eval) if isinstance(raw_eval, int) else None
                                 break
                         except json.JSONDecodeError:
                             continue
+
+            total_tokens = (
+                (prompt_tokens + completion_tokens)
+                if (prompt_tokens is not None and completion_tokens is not None)
+                else None
+            )
+            yield {
+                "type": "done",
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            }
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             logger.warning(f"Ollama connection refused at {self.base_url}: {e}")
             guidance = (
-                f"### ⚠️ Local Ollama Runtime Notice\n\n"
+                f"### Local Ollama Runtime Unavailable\n\n"
                 f"AUREVON AI could not connect to Ollama at `{self.base_url}`.\n\n"
-                f"**To activate local AI inference:**\n"
-                f"1. Download and start [Ollama](https://ollama.com) on your Windows machine, or run:\n"
-                f"   ```powershell\n"
-                f"   winget install Ollama.Ollama\n"
-                f"   ollama run {model or settings.DEFAULT_MODEL}\n"
-                f"   ```\n"
-                f"2. Once Ollama is running, AUREVON will automatically detect it and stream responses directly from your local hardware.\n\n"
-                f"---\n"
-                f"*Echo Diagnostic: Your prompt was successfully captured and persisted in the database.*"
+                f"Start Ollama locally (for example `ollama run {payload['model']}`) or configure a reachable provider in `/admin`."
             )
-            yield guidance
+            yield {
+                "type": "error",
+                "error_category": "connection_unavailable",
+                "error_message": f"Ollama unreachable at {self.base_url}",
+                "user_message": guidance,
+            }
+        except httpx.TimeoutException as e:
+            logger.error(f"Ollama request timed out: {e}")
+            yield {
+                "type": "error",
+                "error_category": "timeout",
+                "error_message": "Ollama request timed out",
+                "user_message": "\n\n**Provider Timeout**: The local AI runtime took too long to respond.",
+            }
         except Exception as e:
             logger.exception("Unexpected error in Ollama stream_chat")
-            yield f"\n\n**System Error**: An unexpected error occurred while communicating with the model provider: `{str(e)}`."
+            yield {
+                "type": "error",
+                "error_category": "unexpected_provider_error",
+                "error_message": str(e)[:200],
+                "user_message": f"\n\n**System Error**: Unable to complete generation (`{str(e)}`).",
+            }
+
+    async def stream_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        temperature: float = 0.7,
+        context_window: int = 8192,
+    ) -> AsyncGenerator[str, None]:
+        async for event in self.stream_chat_with_metrics(messages, model, temperature, context_window):
+            if event["type"] == "token":
+                yield event["text"]
+            elif event["type"] == "error":
+                yield event["user_message"]
 
     async def complete_chat(
         self,

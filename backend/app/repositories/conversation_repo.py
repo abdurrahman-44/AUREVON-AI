@@ -39,6 +39,8 @@ class ConversationRepository:
         query = select(Conversation).options(selectinload(Conversation.messages))
         if user_id:
             query = query.where(Conversation.user_id == user_id)
+        else:
+            query = query.where(Conversation.user_id.is_(None))
         query = query.order_by(desc(Conversation.updated_at)).offset(offset).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())

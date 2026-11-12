@@ -30,6 +30,23 @@ class BaseAIProvider(ABC):
         """Stream response tokens chunk by chunk."""
         pass
 
+    async def stream_chat_with_metrics(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        temperature: float = 0.7,
+        context_window: int = 8192,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream structured token/telemetry/error events from the provider."""
+        async for token in self.stream_chat(messages, model, temperature, context_window):
+            yield {"type": "token", "text": token}
+        yield {
+            "type": "done",
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+        }
+
     @abstractmethod
     async def complete_chat(
         self,

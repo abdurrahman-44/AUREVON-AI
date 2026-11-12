@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, Globe, Search, ExternalLink, Copy, Check, Sparkles, BookOpen, AlertCircle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { AlertCircle, BookOpen, Check, Copy, ExternalLink, Globe, Search, X } from 'lucide-react';
 import { executeResearch } from '../../services/api';
 
 interface ResearchModalProps {
@@ -12,7 +13,12 @@ export const ResearchModal: React.FC<ResearchModalProps> = ({ isOpen, onClose })
   const [maxSources, setMaxSources] = useState(4);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [researchData, setResearchData] = useState<any | null>(null);
+  const [researchData, setResearchData] = useState<{
+    query: string;
+    summary: string;
+    citations: { title: string; snippet: string; url: string }[];
+    source_count: number;
+  } | null>(null);
   const [copied, setCopied] = useState(false);
 
   if (!isOpen) return null;
@@ -20,7 +26,6 @@ export const ResearchModal: React.FC<ResearchModalProps> = ({ isOpen, onClose })
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
-
     setLoading(true);
     setError(null);
     setResearchData(null);
@@ -28,7 +33,7 @@ export const ResearchModal: React.FC<ResearchModalProps> = ({ isOpen, onClose })
       const data = await executeResearch(query.trim(), maxSources);
       setResearchData(data);
     } catch (err: any) {
-      setError(err.message || 'Web research failed. Please check network or query.');
+      setError(err.message || 'Web research failed.');
     } finally {
       setLoading(false);
     }
@@ -36,142 +41,110 @@ export const ResearchModal: React.FC<ResearchModalProps> = ({ isOpen, onClose })
 
   const handleCopyReport = () => {
     if (!researchData) return;
-    const text = `# Research Report: ${researchData.query}\n\n${researchData.synthesis}\n\n## Sources\n` +
-      researchData.sources.map((s: any, idx: number) => `[${idx + 1}] ${s.title}: ${s.url}`).join('\n');
+    const citationsText = (researchData.citations || [])
+      .map((c, idx) => `[${idx + 1}] ${c.title}: ${c.url}`)
+      .join('\n');
+    const text = `# Research Report: ${researchData.query}\n\n${researchData.summary}\n\n## Citations\n${citationsText}`;
     navigator.clipboard.writeText(text);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 1800);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-3xl bg-charcoal-900 border border-charcoal-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-charcoal-800">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400">
-              <Globe className="w-5 h-5" />
-            </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="w-full max-w-3xl rounded-2xl border border-line bg-surface shadow-xl flex flex-col max-h-[88vh] overflow-hidden">
+        <div className="px-6 py-4 border-b border-line flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <Globe size={17} className="text-accent" />
             <div>
-              <h2 className="text-lg font-semibold text-white">Autonomous Web Research</h2>
-              <p className="text-xs text-charcoal-400">Live internet search, content aggregation & grounded source synthesis</p>
+              <h2 className="text-sm font-semibold text-ink">Web Research</h2>
+              <p className="text-[11px] text-ink-secondary">Retrieve live search references with explicit source links</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-charcoal-400 hover:text-white rounded-lg hover:bg-charcoal-800 transition"
-          >
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="p-1.5 rounded-lg text-ink-muted hover:text-ink hover:bg-elevated">
+            <X size={16} />
           </button>
         </div>
 
-        {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar">
-          {/* Search Form */}
-          <form onSubmit={handleSearch} className="space-y-3">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3.5 top-3 text-charcoal-400" />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Enter research topic (e.g., Latest breakthroughs in solid state batteries)..."
-                  className="w-full pl-10 pr-4 py-2.5 bg-charcoal-800 border border-charcoal-700 rounded-xl text-sm text-charcoal-100 placeholder-charcoal-500 focus:outline-none focus:border-teal-500"
-                />
-              </div>
-              <div className="flex items-center bg-charcoal-800 border border-charcoal-700 rounded-xl px-3">
-                <span className="text-xs text-charcoal-400 mr-2">Sources:</span>
-                <select
-                  value={maxSources}
-                  onChange={(e) => setMaxSources(Number(e.target.value))}
-                  className="bg-transparent text-xs text-charcoal-200 focus:outline-none"
-                >
-                  <option value={2} className="bg-charcoal-800">2</option>
-                  <option value={4} className="bg-charcoal-800">4</option>
-                  <option value={6} className="bg-charcoal-800">6</option>
-                  <option value={8} className="bg-charcoal-800">8</option>
-                </select>
-              </div>
-              <button
-                type="submit"
-                disabled={loading || !query.trim()}
-                className="px-5 py-2.5 bg-teal-500 hover:bg-teal-600 disabled:opacity-50 text-white font-medium text-sm rounded-xl flex items-center space-x-2 transition shrink-0"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>{loading ? 'Researching...' : 'Synthesize'}</span>
-              </button>
+        <div className="p-6 overflow-y-auto space-y-5 flex-1">
+          <form onSubmit={handleSearch} className="flex flex-wrap sm:flex-nowrap gap-2">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search size={14} className="absolute left-3.5 top-3 text-ink-muted" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search external references..."
+                className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-line bg-canvas text-xs sm:text-sm text-ink focus:outline-none focus:border-accent"
+              />
             </div>
+            <select
+              value={maxSources}
+              onChange={(e) => setMaxSources(Number(e.target.value))}
+              className="px-3 py-2.5 rounded-xl border border-line bg-canvas text-xs text-ink"
+            >
+              <option value={2}>2 sources</option>
+              <option value={4}>4 sources</option>
+              <option value={6}>6 sources</option>
+              <option value={8}>8 sources</option>
+            </select>
+            <button
+              type="submit"
+              disabled={loading || !query.trim()}
+              className="px-5 py-2.5 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs font-medium transition-colors"
+            >
+              {loading ? 'Searching...' : 'Research'}
+            </button>
           </form>
 
           {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {loading && (
-            <div className="flex flex-col items-center justify-center py-12 space-y-3">
-              <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs text-charcoal-300">Searching web sources and generating verified report...</p>
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-xs text-rose-500 flex items-center gap-2">
+              <AlertCircle size={14} />
+              {error}
             </div>
           )}
 
           {researchData && (
-            <div className="space-y-6">
-              {/* Synthesis Report Card */}
-              <div className="p-5 bg-charcoal-800/60 border border-charcoal-700/60 rounded-xl space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-charcoal-700/60">
-                  <div className="flex items-center space-x-2 text-teal-400 text-xs font-semibold uppercase tracking-wider">
-                    <BookOpen className="w-4 h-4" />
-                    <span>Synthesized Intelligence</span>
-                  </div>
-                  <button
-                    onClick={handleCopyReport}
-                    className="p-1.5 text-charcoal-400 hover:text-white rounded-lg hover:bg-charcoal-700 transition flex items-center gap-1 text-xs"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5 text-teal-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copied ? 'Copied' : 'Copy Report'}</span>
-                  </button>
-                </div>
-                <div className="text-sm text-charcoal-100 whitespace-pre-wrap leading-relaxed">
-                  {researchData.synthesis}
-                </div>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-secondary">
+                  <BookOpen size={14} className="text-accent" />
+                  {researchData.source_count} source{researchData.source_count === 1 ? '' : 's'} returned
+                </span>
+                <button
+                  onClick={handleCopyReport}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-line text-xs text-ink-secondary hover:text-ink"
+                >
+                  {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                  {copied ? 'Copied' : 'Copy Brief'}
+                </button>
               </div>
 
-              {/* Source Citations */}
-              <div className="space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-charcoal-400">
-                  Grounding Sources & Citations ({researchData.sources?.length || 0})
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {researchData.sources?.map((source: any, idx: number) => (
+              <div className="rounded-xl border border-line bg-canvas p-4 prose-aurevon">
+                <ReactMarkdown>{researchData.summary}</ReactMarkdown>
+              </div>
+
+              {researchData.citations.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-medium text-ink-secondary">Source Citations</h4>
+                  {researchData.citations.map((c, idx) => (
                     <a
                       key={idx}
-                      href={source.url}
+                      href={c.url}
                       target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-3.5 bg-charcoal-800/40 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 rounded-xl transition group flex flex-col justify-between"
+                      rel="noreferrer"
+                      className="block rounded-xl border border-line bg-canvas hover:border-line-strong p-3.5 transition-colors space-y-1"
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <h4 className="text-xs font-semibold text-charcoal-200 group-hover:text-teal-400 line-clamp-1">
-                            [{idx + 1}] {source.title}
-                          </h4>
-                          <ExternalLink className="w-3.5 h-3.5 text-charcoal-500 group-hover:text-teal-400 shrink-0" />
-                        </div>
-                        <p className="text-[11px] text-charcoal-400 line-clamp-2 leading-relaxed">
-                          {source.snippet}
-                        </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-ink">{c.title}</span>
+                        <ExternalLink size={12} className="text-ink-muted shrink-0" />
                       </div>
-                      <span className="text-[10px] text-charcoal-500 truncate pt-2">
-                        {source.url}
-                      </span>
+                      <p className="text-xs text-ink-secondary line-clamp-2">{c.snippet}</p>
+                      <span className="block text-[11px] font-mono text-accent truncate">{c.url}</span>
                     </a>
                   ))}
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>

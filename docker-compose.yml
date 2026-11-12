@@ -1,12 +1,16 @@
-version: '3.8'
-
 # ==============================================================================
 # AUREVON AI - Production Multi-Container Orchestration
-# Services: PostgreSQL 16 + FastAPI Backend + Nginx SPA Frontend
+# Services: PostgreSQL 16 + FastAPI Backend + Nginx SPA Frontend (+ optional self-hosted Ollama)
+# Usage:
+#   1. cp .env.production.example .env  (set strong secrets & hosted inference URL/key)
+#   2. docker compose up -d --build
+#   3. docker compose exec backend alembic upgrade head
+#   4. docker compose exec backend python -m backend.scripts.bootstrap_owner
+# Optional private self-hosted Ollama profile:
+#   docker compose --profile selfhost-ollama up -d --build
 # ==============================================================================
 
 services:
-  # 1. Primary Relational Database
   db:
     image: postgres:16-alpine
     container_name: aurevon-postgres
@@ -14,7 +18,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-aurevon}
       POSTGRES_USER: ${POSTGRES_USER:-aurevon}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aurevon_secure_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +29,6 @@ services:
     networks:
       - aurevon-network
 
-  # 2. FastAPI Intelligence Backend
   backend:
     build:
       context: .
@@ -33,18 +36,38 @@ services:
     container_name: aurevon-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aurevon}:${POSTGRES_PASSWORD:-aurevon_secure_secret}@db:5432/${POSTGRES_DB:-aurevon}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-b7c89f2a4e6d8190c3a5e782914619d850a1c2e47890f123456789abcdef0123}
-      JWT_ALGORITHM: HS256
-      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 10080
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      DEFAULT_MODEL: ${DEFAULT_MODEL:-qwen2.5:3b}
-      MODEL_CONTEXT_WINDOW: 8192
-      CORS_ORIGINS: '["http://localhost", "http://localhost:3000", "http://127.0.0.1:3000"]'
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: ${DEBUG:-false}
+      ENABLE_DOCS: ${ENABLE_DOCS:-false}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aurevon}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-aurevon}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
+      DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-production}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama-3.1-8b-instant}
+      MODEL_CONTEXT_WINDOW: ${MODEL_CONTEXT_WINDOW:-8192}
+      GENERATION_TEMPERATURE: ${GENERATION_TEMPERATURE:-0.7}
+      PIN_DEFAULT_MODEL: ${PIN_DEFAULT_MODEL:-true}
+      ALLOW_USER_MODEL_SWITCHING: ${ALLOW_USER_MODEL_SWITCHING:-false}
+      PRODUCTION_INFERENCE_PROVIDER: ${PRODUCTION_INFERENCE_PROVIDER:-production}
+      PRODUCTION_INFERENCE_URL: ${PRODUCTION_INFERENCE_URL:-}
+      PRODUCTION_INFERENCE_API_KEY: ${PRODUCTION_INFERENCE_API_KEY:-}
+      PRODUCTION_DEFAULT_MODEL: ${PRODUCTION_DEFAULT_MODEL:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/app/storage/uploads}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-25}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost","http://localhost:3000","http://127.0.0.1:3000"]}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_CHAT_PER_MINUTE: ${RATE_LIMIT_CHAT_PER_MINUTE:-30}
+      RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-15}
+      RATE_LIMIT_UPLOAD_PER_MINUTE: ${RATE_LIMIT_UPLOAD_PER_MINUTE:-20}
+      RATE_LIMIT_ADMIN_TERMINAL_PER_MINUTE: ${RATE_LIMIT_ADMIN_TERMINAL_PER_MINUTE:-30}
+      ADMIN_SESSION_EXPIRE_MINUTES: ${ADMIN_SESSION_EXPIRE_MINUTES:-720}
+      LOG_RETENTION_DAYS_DEFAULT: ${LOG_RETENTION_DAYS_DEFAULT:-30}
     volumes:
-      - backend_uploads:/app/backend/uploads
+      - backend_uploads:/app/storage/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -53,7 +76,6 @@ services:
     networks:
       - aurevon-network
 
-  # 3. Static Nginx Reverse-Proxy & SPA
   frontend:
     build:
       context: .
@@ -67,6 +89,16 @@ services:
     networks:
       - aurevon-network
 
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["selfhost-ollama"]
+    container_name: aurevon-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - aurevon-network
+
 networks:
   aurevon-network:
     name: aurevon-network
@@ -77,3 +109,5 @@ volumes:
     name: aurevon-postgres-data
   backend_uploads:
     name: aurevon-backend-uploads
+  ollama_models:
+    name: aurevon-ollama-models

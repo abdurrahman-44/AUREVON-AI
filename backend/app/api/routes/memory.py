@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.database.session import get_db
-from backend.app.api.deps import get_optional_user
+from backend.app.api.deps import get_optional_user, assert_resource_ownership
 from backend.app.models.entities import Memory, User
 from backend.app.schemas.memory import MemoryCreate, MemoryUpdate, MemoryResponse
 
@@ -20,6 +20,8 @@ async def list_memories(
     stmt = select(Memory)
     if current_user:
         stmt = stmt.where(Memory.user_id == current_user.id)
+    else:
+        stmt = stmt.where(Memory.user_id.is_(None))
     stmt = stmt.order_by(Memory.updated_at.desc())
     res = await db.execute(stmt)
     return list(res.scalars().all())
@@ -52,6 +54,7 @@ async def create_memory(
 async def update_memory(
     memory_id: str,
     payload: MemoryUpdate,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Memory).where(Memory.id == memory_id)
@@ -59,6 +62,7 @@ async def update_memory(
     mem = res.scalar_one_or_none()
     if not mem:
         raise HTTPException(status_code=404, detail="Memory not found")
+    assert_resource_ownership(mem.user_id, current_user, "memory")
 
     if payload.content is not None:
         mem.content = payload.content.strip()
@@ -76,6 +80,7 @@ async def update_memory(
 @router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_memory(
     memory_id: str,
+    current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Memory).where(Memory.id == memory_id)
@@ -83,6 +88,7 @@ async def delete_memory(
     mem = res.scalar_one_or_none()
     if not mem:
         raise HTTPException(status_code=404, detail="Memory not found")
+    assert_resource_ownership(mem.user_id, current_user, "memory")
 
     await db.delete(mem)
     await db.commit()

@@ -8,6 +8,14 @@ from backend.app.models.entities import (
     Document,
     DocumentChunk,
     AgentRun,
+    AIRequestLog,
+    SystemAIConfig,
+    SystemPromptVersion,
+    RevokedToken,
+    AdminAuditLog,
+    SecurityEvent,
+    APIRequestLog,
+    PlatformConfig,
 )
 
 __all__ = [
@@ -20,4 +28,12 @@ __all__ = [
     "Document",
     "DocumentChunk",
     "AgentRun",
+    "AIRequestLog",
+    "SystemAIConfig",
+    "SystemPromptVersion",
+    "RevokedToken",
+    "AdminAuditLog",
+    "SecurityEvent",
+    "APIRequestLog",
+    "PlatformConfig",
 ]

@@ -2,9 +2,11 @@ import json
 import httpx
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from backend.app.api.deps import require_admin
+from backend.app.models.entities import User
 from backend.app.schemas.model import ModelInfo, ProviderHealth
 from backend.app.services.ai.factory import ProviderFactory, get_ai_provider
 from backend.app.core.config import settings
@@ -55,8 +57,11 @@ async def check_all_providers_health():
 
 
 @router.post("/configure")
-async def configure_provider(payload: ConfigureProviderRequest):
-    """Securely configure a cloud AI provider API key."""
+async def configure_provider(
+    payload: ConfigureProviderRequest,
+    admin_user: User = Depends(require_admin),
+):
+    """Securely configure a cloud AI provider API key (Owner only)."""
     p_name = payload.provider.lower()
     ProviderFactory.set_api_key(p_name, payload.api_key)
     provider = ProviderFactory.get_provider(p_name)
@@ -69,8 +74,11 @@ async def configure_provider(payload: ConfigureProviderRequest):
 
 
 @router.post("/pull")
-async def pull_model_endpoint(payload: PullModelRequest):
-    """Trigger an Ollama model pull and stream progress via SSE."""
+async def pull_model_endpoint(
+    payload: PullModelRequest,
+    admin_user: User = Depends(require_admin),
+):
+    """Trigger an Ollama model pull and stream progress via SSE (Owner only)."""
     model_name = payload.name.strip()
     ollama_url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/pull"
 

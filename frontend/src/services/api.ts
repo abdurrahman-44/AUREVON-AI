@@ -1,4 +1,40 @@
-import { Conversation, ConversationDetail, ModelInfo, SystemStatus, User, AuthResponse, UserSettings } from '../types';
+import {
+  AITestResponse,
+  AdminAnalyticsResponse,
+  AdminUserDetailResponse,
+  AdminUserItem,
+  AuthResponse,
+  BootstrapStatus,
+  Conversation,
+  ConversationDetail,
+  ErrorLogsResponse,
+  LogPruneResponse,
+  ModelInfo,
+  PaginatedAPIRequestLogsResponse,
+  PaginatedAdminAuditLogsResponse,
+  PaginatedSecurityEventsResponse,
+  PaginatedUsersResponse,
+  PlatformConfigResponse,
+  PublicIntelligenceConfig,
+  SystemAIConfigResponse,
+  SystemDiagnosticsResponse,
+  SystemMonitoringResponse,
+  SystemStatus,
+  TerminalCommandInfo,
+  TerminalExecuteResponse,
+  TwoFactorSetupResponse,
+  TwoFactorStatusResponse,
+  User,
+  UserSettings,
+} from '../types';
+
+export class TwoFactorRequiredError extends Error {
+  twoFactorRequired = true;
+  constructor(message = 'Two-factor authentication code required') {
+    super(message);
+    this.name = 'TwoFactorRequiredError';
+  }
+}
 
 const API_BASE = '/api';
 
@@ -10,17 +46,24 @@ function getAuthHeader(): Record<string, string> {
   return {};
 }
 
-// ----------------- Auth & Settings -----------------
+async function parseError(res: Response, fallback: string): Promise<string> {
+  try {
+    const err = await res.json();
+    if (typeof err?.detail === 'string') return err.detail;
+  } catch {
+    // ignore JSON parse failure
+  }
+  return res.statusText || fallback;
+}
+
+// ----------------- Auth & Bootstrap -----------------
 export async function registerUser(username: string, email: string, password: string): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, email, password }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Registration failed');
-  }
+  if (!res.ok) throw new Error(await parseError(res, 'Registration failed'));
   return res.json();
 }
 
@@ -30,10 +73,68 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
+  if (!res.ok) throw new Error(await parseError(res, 'Login failed'));
+  return res.json();
+}
+
+export async function adminLogin(
+  email: string,
+  password: string,
+  totpCode?: string
+): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/admin-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      password,
+      totp_code: totpCode?.trim() || undefined,
+    }),
+  });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Login failed');
+    const msg = await parseError(res, 'Administrator authentication failed');
+    if (res.status === 401 && res.headers.get('X-AUREVON-2FA-Required') === 'true') {
+      throw new TwoFactorRequiredError(msg);
+    }
+    throw new Error(msg);
   }
+  return res.json();
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: { ...getAuthHeader() },
+    });
+  } catch {
+    // Best-effort revocation; client still clears token locally
+  }
+}
+
+export async function fetchBootstrapStatus(): Promise<BootstrapStatus> {
+  const res = await fetch(`${API_BASE}/auth/bootstrap-status`);
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to check bootstrap status'));
+  return res.json();
+}
+
+export async function bootstrapOwner(
+  username: string,
+  email: string,
+  password: string,
+  bootstrapToken?: string
+): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/bootstrap-owner`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username,
+      email,
+      password,
+      bootstrap_token: bootstrapToken || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Owner bootstrap failed'));
   return res.json();
 }
 
@@ -66,6 +167,314 @@ export async function updateUserSettings(settings: Partial<UserSettings>): Promi
   return res.json();
 }
 
+// ----------------- Public Intelligence Config -----------------
+export async function fetchPublicIntelligence(): Promise<PublicIntelligenceConfig> {
+  const res = await fetch(`${API_BASE}/intelligence/public`);
+  if (!res.ok) throw new Error('Failed to fetch intelligence config');
+  return res.json();
+}
+
+// ----------------- Owner Console & Control Centre API -----------------
+export async function fetchAdminAnalytics(
+  range: '24h' | '7d' | '30d' | '90d' | 'custom' = '7d',
+  startDate?: string,
+  endDate?: string
+): Promise<AdminAnalyticsResponse> {
+  const params = new URLSearchParams({ range });
+  if (range === 'custom' && startDate && endDate) {
+    params.set('start_date', startDate);
+    params.set('end_date', endDate);
+  }
+  const res = await fetch(`${API_BASE}/admin/analytics?${params.toString()}`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch analytics'));
+  return res.json();
+}
+
+export async function fetchAdminUsers(params: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  role?: string;
+  isActive?: string;
+}): Promise<PaginatedUsersResponse> {
+  const qs = new URLSearchParams();
+  qs.set('page', String(params.page || 1));
+  qs.set('page_size', String(params.pageSize || 15));
+  if (params.search?.trim()) qs.set('search', params.search.trim());
+  if (params.role && params.role !== 'all') qs.set('role', params.role);
+  if (params.isActive === 'active') qs.set('is_active', 'true');
+  if (params.isActive === 'suspended') qs.set('is_active', 'false');
+
+  const res = await fetch(`${API_BASE}/admin/users?${qs.toString()}`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load users'));
+  return res.json();
+}
+
+export async function updateAdminUserStatus(userId: string, isActive: boolean): Promise<AdminUserItem> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ is_active: isActive }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to update account status'));
+  return res.json();
+}
+
+export async function updateAdminUserRole(userId: string, role: 'user' | 'owner'): Promise<AdminUserItem> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/role`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ role }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to update role'));
+  return res.json();
+}
+
+export async function fetchAdminMonitoring(): Promise<SystemMonitoringResponse> {
+  const res = await fetch(`${API_BASE}/admin/monitoring`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch system monitoring'));
+  return res.json();
+}
+
+export async function fetchAdminIntelligence(): Promise<SystemAIConfigResponse> {
+  const res = await fetch(`${API_BASE}/admin/intelligence`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch intelligence configuration'));
+  return res.json();
+}
+
+export async function updateAdminIntelligence(payload: Partial<SystemAIConfigResponse>): Promise<SystemAIConfigResponse> {
+  const res = await fetch(`${API_BASE}/admin/intelligence`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to save intelligence configuration'));
+  return res.json();
+}
+
+export async function createSystemPromptVersion(payload: {
+  name: string;
+  content: string;
+  notes?: string;
+  activate?: boolean;
+}): Promise<SystemAIConfigResponse> {
+  const res = await fetch(`${API_BASE}/admin/intelligence/prompts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ activate: true, ...payload }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to create system prompt version'));
+  return res.json();
+}
+
+export async function configureCloudProvider(provider: string, apiKey: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/models/configure`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ provider, api_key: apiKey }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to configure provider'));
+  return res.json();
+}
+
+export async function fetchAdminUserDetail(userId: string): Promise<AdminUserDetailResponse> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch user profile'));
+  return res.json();
+}
+
+export async function runAdminAITest(payload?: {
+  provider?: string;
+  model?: string;
+  prompt?: string;
+}): Promise<AITestResponse> {
+  const res = await fetch(`${API_BASE}/admin/ai/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'AI connectivity test failed'));
+  return res.json();
+}
+
+export async function fetchAdminDiagnostics(): Promise<SystemDiagnosticsResponse> {
+  const res = await fetch(`${API_BASE}/admin/diagnostics`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to run diagnostics'));
+  return res.json();
+}
+
+export async function fetchAdminTerminalCommands(): Promise<TerminalCommandInfo[]> {
+  const res = await fetch(`${API_BASE}/admin/terminal/commands`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load terminal command catalog'));
+  return res.json();
+}
+
+export async function executeAdminTerminalCommand(
+  command: string,
+  confirmToken?: string
+): Promise<TerminalExecuteResponse> {
+  const res = await fetch(`${API_BASE}/admin/terminal/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({
+      command,
+      confirm_token: confirmToken || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Terminal execution failed'));
+  return res.json();
+}
+
+export async function fetchApiRequestLogs(params: {
+  page?: number;
+  pageSize?: number;
+  method?: string;
+  statusCode?: number;
+  pathSearch?: string;
+}): Promise<PaginatedAPIRequestLogsResponse> {
+  const qs = new URLSearchParams();
+  qs.set('page', String(params.page || 1));
+  qs.set('page_size', String(params.pageSize || 25));
+  if (params.method?.trim()) qs.set('method', params.method.trim());
+  if (params.statusCode) qs.set('status_code', String(params.statusCode));
+  if (params.pathSearch?.trim()) qs.set('path_search', params.pathSearch.trim());
+
+  const res = await fetch(`${API_BASE}/admin/logs/requests?${qs.toString()}`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load API request logs'));
+  return res.json();
+}
+
+export async function fetchAdminAuditLogs(params: {
+  page?: number;
+  pageSize?: number;
+  action?: string;
+  statusFilter?: string;
+  search?: string;
+}): Promise<PaginatedAdminAuditLogsResponse> {
+  const qs = new URLSearchParams();
+  qs.set('page', String(params.page || 1));
+  qs.set('page_size', String(params.pageSize || 25));
+  if (params.action?.trim()) qs.set('action', params.action.trim());
+  if (params.statusFilter?.trim()) qs.set('status_filter', params.statusFilter.trim());
+  if (params.search?.trim()) qs.set('search', params.search.trim());
+
+  const res = await fetch(`${API_BASE}/admin/logs/audit?${qs.toString()}`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load admin audit logs'));
+  return res.json();
+}
+
+export async function fetchRecentErrorLogs(): Promise<ErrorLogsResponse> {
+  const res = await fetch(`${API_BASE}/admin/logs/errors`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load error logs'));
+  return res.json();
+}
+
+export async function pruneOperationalLogs(retentionDays: number): Promise<LogPruneResponse> {
+  const res = await fetch(`${API_BASE}/admin/logs/prune`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ retention_days: retentionDays }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to prune operational logs'));
+  return res.json();
+}
+
+export async function fetchSecurityEvents(params: {
+  page?: number;
+  pageSize?: number;
+  eventType?: string;
+  severity?: string;
+}): Promise<PaginatedSecurityEventsResponse> {
+  const qs = new URLSearchParams();
+  qs.set('page', String(params.page || 1));
+  qs.set('page_size', String(params.pageSize || 25));
+  if (params.eventType?.trim()) qs.set('event_type', params.eventType.trim());
+  if (params.severity && params.severity !== 'all') qs.set('severity', params.severity);
+
+  const res = await fetch(`${API_BASE}/admin/security/events?${qs.toString()}`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load security events'));
+  return res.json();
+}
+
+export async function fetchTwoFactorStatus(): Promise<TwoFactorStatusResponse> {
+  const res = await fetch(`${API_BASE}/admin/security/2fa/status`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to check 2FA status'));
+  return res.json();
+}
+
+export async function setupTwoFactor(): Promise<TwoFactorSetupResponse> {
+  const res = await fetch(`${API_BASE}/admin/security/2fa/setup`, {
+    method: 'POST',
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to initiate 2FA setup'));
+  return res.json();
+}
+
+export async function enableTwoFactor(code: string): Promise<TwoFactorStatusResponse> {
+  const res = await fetch(`${API_BASE}/admin/security/2fa/enable`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to enable 2FA'));
+  return res.json();
+}
+
+export async function disableTwoFactor(code: string): Promise<TwoFactorStatusResponse> {
+  const res = await fetch(`${API_BASE}/admin/security/2fa/disable`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to disable 2FA'));
+  return res.json();
+}
+
+export async function fetchPlatformSettings(): Promise<PlatformConfigResponse> {
+  const res = await fetch(`${API_BASE}/admin/settings`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load platform settings'));
+  return res.json();
+}
+
+export async function updatePlatformSettings(
+  payload: Partial<PlatformConfigResponse>
+): Promise<PlatformConfigResponse> {
+  const res = await fetch(`${API_BASE}/admin/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to save platform settings'));
+  return res.json();
+}
+
 // ----------------- Documents (RAG) -----------------
 export async function uploadDocument(file: File): Promise<any> {
   const formData = new FormData();
@@ -75,10 +484,7 @@ export async function uploadDocument(file: File): Promise<any> {
     headers: { ...getAuthHeader() },
     body: formData,
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Upload failed');
-  }
+  if (!res.ok) throw new Error(await parseError(res, 'Upload failed'));
   return res.json();
 }
 
@@ -86,7 +492,7 @@ export async function fetchDocuments(): Promise<any[]> {
   const res = await fetch(`${API_BASE}/documents`, {
     headers: { ...getAuthHeader() },
   });
-  if (!res.ok) throw new Error('Failed to fetch documents');
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch documents'));
   return res.json();
 }
 
@@ -95,7 +501,7 @@ export async function deleteDocument(id: string): Promise<void> {
     method: 'DELETE',
     headers: { ...getAuthHeader() },
   });
-  if (!res.ok) throw new Error('Failed to delete document');
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to delete document'));
 }
 
 export async function queryDocuments(query: string, topK: number = 4): Promise<any> {
@@ -107,7 +513,7 @@ export async function queryDocuments(query: string, topK: number = 4): Promise<a
     },
     body: JSON.stringify({ query, top_k: topK }),
   });
-  if (!res.ok) throw new Error('Query failed');
+  if (!res.ok) throw new Error(await parseError(res, 'Query failed'));
   return res.json();
 }
 
@@ -116,7 +522,7 @@ export async function fetchMemories(): Promise<any[]> {
   const res = await fetch(`${API_BASE}/memory`, {
     headers: { ...getAuthHeader() },
   });
-  if (!res.ok) throw new Error('Failed to fetch memories');
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch memories'));
   return res.json();
 }
 
@@ -129,11 +535,14 @@ export async function createMemory(content: string, category: string = 'general'
     },
     body: JSON.stringify({ content, category }),
   });
-  if (!res.ok) throw new Error('Failed to create memory');
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to create memory'));
   return res.json();
 }
 
-export async function updateMemory(id: string, updates: { content?: string; category?: string; is_active?: boolean }): Promise<any> {
+export async function updateMemory(
+  id: string,
+  updates: { content?: string; category?: string; is_active?: boolean }
+): Promise<any> {
   const res = await fetch(`${API_BASE}/memory/${id}`, {
     method: 'PATCH',
     headers: {
@@ -142,7 +551,7 @@ export async function updateMemory(id: string, updates: { content?: string; cate
     },
     body: JSON.stringify(updates),
   });
-  if (!res.ok) throw new Error('Failed to update memory');
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to update memory'));
   return res.json();
 }
 
@@ -151,7 +560,7 @@ export async function deleteMemory(id: string): Promise<void> {
     method: 'DELETE',
     headers: { ...getAuthHeader() },
   });
-  if (!res.ok) throw new Error('Failed to delete memory');
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to delete memory'));
 }
 
 // ----------------- Web Research -----------------
@@ -164,7 +573,7 @@ export async function executeResearch(query: string, maxSources: number = 4): Pr
     },
     body: JSON.stringify({ query, max_sources: maxSources }),
   });
-  if (!res.ok) throw new Error('Research failed');
+  if (!res.ok) throw new Error(await parseError(res, 'Research failed'));
   return res.json();
 }
 
@@ -184,10 +593,7 @@ export async function runAgentTask(task: string, model?: string): Promise<any> {
     },
     body: JSON.stringify({ task, model }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Agent execution failed');
-  }
+  if (!res.ok) throw new Error(await parseError(res, 'Agent execution failed'));
   return res.json();
 }
 
@@ -195,7 +601,7 @@ export async function fetchAgentRuns(): Promise<any[]> {
   const res = await fetch(`${API_BASE}/agents/runs`, {
     headers: { ...getAuthHeader() },
   });
-  if (!res.ok) throw new Error('Failed to fetch agent runs');
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch agent runs'));
   return res.json();
 }
 
@@ -204,7 +610,7 @@ export async function fetchConversations(): Promise<Conversation[]> {
   const res = await fetch(`${API_BASE}/conversations`, {
     headers: { ...getAuthHeader() },
   });
-  if (!res.ok) throw new Error(`Failed to fetch conversations: ${res.statusText}`);
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch conversations'));
   return res.json();
 }
 
@@ -212,7 +618,7 @@ export async function fetchConversation(id: string): Promise<ConversationDetail>
   const res = await fetch(`${API_BASE}/conversations/${id}`, {
     headers: { ...getAuthHeader() },
   });
-  if (!res.ok) throw new Error(`Failed to fetch conversation: ${res.statusText}`);
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to fetch conversation'));
   return res.json();
 }
 
@@ -225,7 +631,7 @@ export async function createConversation(title?: string): Promise<Conversation> 
     },
     body: JSON.stringify({ title: title || 'New Conversation' }),
   });
-  if (!res.ok) throw new Error(`Failed to create conversation: ${res.statusText}`);
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to create conversation'));
   return res.json();
 }
 
@@ -238,7 +644,7 @@ export async function updateConversationTitle(id: string, title: string): Promis
     },
     body: JSON.stringify({ title }),
   });
-  if (!res.ok) throw new Error(`Failed to update conversation: ${res.statusText}`);
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to update conversation'));
   return res.json();
 }
 
@@ -247,7 +653,7 @@ export async function deleteConversation(id: string): Promise<void> {
     method: 'DELETE',
     headers: { ...getAuthHeader() },
   });
-  if (!res.ok) throw new Error(`Failed to delete conversation: ${res.statusText}`);
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to delete conversation'));
 }
 
 // ----------------- System & Models -----------------
@@ -271,8 +677,20 @@ export interface StreamChatParams {
   images?: string[];
   abortSignal?: AbortSignal;
   onChunk: (delta: string) => void;
-  onInit?: (data: { conversation_id: string; user_message_id: string }) => void;
-  onDone?: (data: { conversation_id: string; assistant_message_id: string }) => void;
+  onInit?: (data: {
+    conversation_id: string;
+    user_message_id: string;
+    model?: string;
+    provider?: string;
+    model_pinned?: boolean;
+  }) => void;
+  onDone?: (data: {
+    conversation_id: string;
+    assistant_message_id: string;
+    model?: string;
+    provider?: string;
+    token_usage?: Record<string, any> | null;
+  }) => void;
   onError?: (error: Error) => void;
 }
 
@@ -308,8 +726,8 @@ export async function streamChat({
     });
 
     if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Chat API error (${response.status}): ${errText}`);
+      const msg = await parseError(response, `Chat API error (${response.status})`);
+      throw new Error(msg);
     }
 
     if (!response.body) {
@@ -351,10 +769,8 @@ export async function streamChat({
     }
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      console.log('Stream request aborted by user');
       return;
     }
-    console.error('Stream chat exception:', err);
     if (onError) onError(err);
     throw err;
   }

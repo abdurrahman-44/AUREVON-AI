@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, Cpu, Cloud, Download, Key, Check } from 'lucide-react';
+import { Cpu, Download, Key, Shield, X } from 'lucide-react';
+import { configureCloudProvider } from '../../services/api';
 import { ModelInfo, ProviderHealth } from '../../types';
 
 interface ModelManagementModalProps {
@@ -8,6 +9,7 @@ interface ModelManagementModalProps {
   models: ModelInfo[];
   providerHealths: ProviderHealth[];
   onRefresh: () => void;
+  isOwner?: boolean;
 }
 
 export const ModelManagementModal: React.FC<ModelManagementModalProps> = ({
@@ -16,13 +18,13 @@ export const ModelManagementModal: React.FC<ModelManagementModalProps> = ({
   models,
   providerHealths,
   onRefresh,
+  isOwner = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'catalog' | 'cloud' | 'pull'>('catalog');
   const [pullModelName, setPullModelName] = useState('qwen2.5:3b');
   const [pullStatus, setPullStatus] = useState<string | null>(null);
   const [pulling, setPulling] = useState(false);
 
-  // Cloud API keys state
   const [selectedCloudProvider, setSelectedCloudProvider] = useState('groq');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [saveCloudStatus, setSaveCloudStatus] = useState<string | null>(null);
@@ -33,272 +35,214 @@ export const ModelManagementModal: React.FC<ModelManagementModalProps> = ({
   const handlePullModel = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pullModelName.trim() || pulling) return;
-    setPulling(true);
-    setPullStatus('Initiating pull with Ollama runtime...');
 
+    setPulling(true);
+    setPullStatus(`Starting pull for ${pullModelName}...`);
     try {
+      const token = localStorage.getItem('aurevon_token');
       const res = await fetch('/api/models/pull', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ name: pullModelName.trim() }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setPullStatus(`Pull request sent for ${pullModelName}. Ollama is fetching layers.`);
-      setTimeout(() => {
-        onRefresh();
-        setPulling(false);
-      }, 3000);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || 'Pull request rejected');
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder('utf-8');
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const parsed = JSON.parse(line.slice(6));
+              if (parsed.error) throw new Error(parsed.error);
+              if (parsed.status) setPullStatus(parsed.status);
+            } catch {
+              // ignore non-json SSE line
+            }
+          }
+        }
+      }
+      setPullStatus(`Model '${pullModelName}' is ready.`);
+      onRefresh();
     } catch (err: any) {
-      setPullStatus(`Pull failed: ${err.message || 'Make sure Ollama is running.'}`);
+      setPullStatus(`Error: ${err.message}`);
+    } finally {
       setPulling(false);
     }
   };
 
-  const handleConfigureCloud = async (e: React.FormEvent) => {
+  const handleSaveApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!apiKeyInput.trim() || savingKey) return;
+    if (!apiKeyInput.trim()) return;
     setSavingKey(true);
     setSaveCloudStatus(null);
-
     try {
-      const res = await fetch('/api/models/configure', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: selectedCloudProvider,
-          api_key: apiKeyInput.trim(),
-        }),
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setSaveCloudStatus(`Successfully configured ${selectedCloudProvider.toUpperCase()}! Status: ${data.health.status}`);
+      const res = await configureCloudProvider(selectedCloudProvider, apiKeyInput.trim());
+      setSaveCloudStatus(`Configured ${res.provider} (${res.health?.status || 'checked'})`);
       setApiKeyInput('');
       onRefresh();
     } catch (err: any) {
-      setSaveCloudStatus(`Configuration failed: ${err.message}`);
+      setSaveCloudStatus(`Error: ${err.message}`);
     } finally {
       setSavingKey(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-2xl bg-charcoal-900 border border-charcoal-800 rounded-2xl shadow-2xl p-6 sm:p-8 max-h-[90vh] flex flex-col">
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-charcoal-400 hover:text-white hover:bg-charcoal-800 transition-colors"
-        >
-          <X size={18} />
-        </button>
-
-        <h2 className="text-xl font-bold text-white tracking-tight mb-1">Model & Provider Management</h2>
-        <p className="text-xs text-charcoal-400 mb-6">
-          Inspect local open-weight models, pull weights from Ollama, or configure cloud API gateways.
-        </p>
-
-        {/* Tab Switcher */}
-        <div className="flex items-center gap-2 border-b border-charcoal-800 pb-3 mb-6">
-          <button
-            onClick={() => setActiveTab('catalog')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'catalog'
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'text-charcoal-400 hover:text-charcoal-200 hover:bg-charcoal-800'
-            }`}
-          >
-            <Cpu size={14} />
-            <span>Active Catalog ({models.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('cloud')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'cloud'
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'text-charcoal-400 hover:text-charcoal-200 hover:bg-charcoal-800'
-            }`}
-          >
-            <Cloud size={14} />
-            <span>Cloud Adapters</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('pull')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'pull'
-                ? 'bg-brand-600 text-white shadow-sm'
-                : 'text-charcoal-400 hover:text-charcoal-200 hover:bg-charcoal-800'
-            }`}
-          >
-            <Download size={14} />
-            <span>Pull Local Weights</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl rounded-2xl border border-line bg-surface shadow-xl overflow-hidden flex flex-col max-h-[85vh]">
+        <div className="px-6 py-4 border-b border-line flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <Cpu size={17} className="text-accent" />
+            <div>
+              <h2 className="text-sm font-semibold text-ink">AI Models & Runtimes</h2>
+              <p className="text-[11px] text-ink-secondary">Installed models and provider availability</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-ink-muted hover:text-ink hover:bg-elevated">
+            <X size={16} />
           </button>
         </div>
 
-        {/* Tab 1: Catalog */}
-        {activeTab === 'catalog' && (
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-            {models.map((m) => (
-              <div
-                key={m.id}
-                className="p-3.5 rounded-xl bg-charcoal-800/40 border border-charcoal-700/60 flex items-center justify-between"
+        <div className="px-6 border-b border-line flex items-center gap-2 text-xs">
+          <button
+            onClick={() => setActiveTab('catalog')}
+            className={`py-2.5 px-3 border-b-2 font-medium ${
+              activeTab === 'catalog' ? 'border-accent text-ink' : 'border-transparent text-ink-muted'
+            }`}
+          >
+            Available Models
+          </button>
+          {isOwner && (
+            <>
+              <button
+                onClick={() => setActiveTab('cloud')}
+                className={`py-2.5 px-3 border-b-2 font-medium ${
+                  activeTab === 'cloud' ? 'border-accent text-ink' : 'border-transparent text-ink-muted'
+                }`}
               >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-white">{m.name}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-charcoal-800 text-brand-300 border border-charcoal-700 font-mono">
-                      {m.provider}
-                    </span>
-                    {m.is_default && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium">
-                        Default
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 mt-1.5 text-[11px] text-charcoal-400">
-                    <span>Context: {m.capabilities?.context_length?.toLocaleString() || 8192} tokens</span>
-                    {m.size && <span>Size: {m.size}</span>}
-                    <span>Tools: {m.capabilities?.tools ? 'Supported' : 'No'}</span>
-                    <span>Vision: {m.capabilities?.vision ? 'Supported' : 'No'}</span>
-                  </div>
-                </div>
+                Cloud Keys (Owner)
+              </button>
+              <button
+                onClick={() => setActiveTab('pull')}
+                className={`py-2.5 px-3 border-b-2 font-medium ${
+                  activeTab === 'pull' ? 'border-accent text-ink' : 'border-transparent text-ink-muted'
+                }`}
+              >
+                Pull Ollama Model
+              </button>
+            </>
+          )}
+        </div>
 
-                <div className="flex items-center gap-1 text-emerald-400 text-xs font-mono">
-                  <Check size={14} />
-                  <span>Available</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Tab 2: Cloud Adapters */}
-        {activeTab === 'cloud' && (
-          <div className="flex-1 overflow-y-auto space-y-6 pr-1">
-            <div className="p-4 rounded-xl bg-charcoal-800/40 border border-charcoal-700/60">
-              <h3 className="text-xs font-semibold text-white mb-2 flex items-center gap-1.5">
-                <Key size={14} className="text-brand-400" />
-                <span>Configure OpenAI-Compatible Gateway</span>
-              </h3>
-              <p className="text-xs text-charcoal-400 mb-4">
-                Enter an API key for Groq, DeepSeek, or OpenAI. Keys are held in backend memory and never exposed to the public browser.
-              </p>
-
-              <form onSubmit={handleConfigureCloud} className="space-y-3">
-                <div className="grid grid-cols-3 gap-2">
-                  {['groq', 'openai', 'deepseek'].map((prov) => (
-                    <button
-                      key={prov}
-                      type="button"
-                      onClick={() => setSelectedCloudProvider(prov)}
-                      className={`py-2 px-3 rounded-xl border text-xs font-semibold uppercase tracking-wider transition-all ${
-                        selectedCloudProvider === prov
-                          ? 'bg-charcoal-800 border-brand-500 text-white'
-                          : 'bg-charcoal-800/40 border-charcoal-700/60 text-charcoal-400 hover:text-charcoal-200'
-                      }`}
-                    >
-                      {prov}
-                    </button>
-                  ))}
-                </div>
-
-                <div>
-                  <input
-                    type="password"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    placeholder={`Enter ${selectedCloudProvider.toUpperCase()} API Key (e.g. gsk_...)`}
-                    className="w-full bg-charcoal-800 border border-charcoal-700 rounded-xl px-3 py-2 text-xs text-white placeholder-charcoal-500 focus:outline-none focus:border-brand-500 font-mono"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={savingKey || !apiKeyInput.trim()}
-                  className="w-full py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-all shadow-md shadow-brand-600/30 disabled:opacity-50"
-                >
-                  {savingKey ? 'Verifying Key...' : `Save & Activate ${selectedCloudProvider.toUpperCase()}`}
-                </button>
-              </form>
-
-              {saveCloudStatus && (
-                <div className="mt-3 p-2.5 rounded-lg bg-charcoal-800 border border-charcoal-700 text-xs text-charcoal-200">
-                  {saveCloudStatus}
-                </div>
-              )}
-            </div>
-
-            {/* Provider Health Overview */}
-            <div>
-              <h4 className="text-xs font-semibold text-charcoal-300 uppercase tracking-wider mb-2">
-                Active Provider Gateway Status
-              </h4>
-              <div className="grid grid-cols-2 gap-2">
+        <div className="p-6 overflow-y-auto space-y-4">
+          {activeTab === 'catalog' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {providerHealths.map((ph) => (
-                  <div key={ph.provider} className="p-3 rounded-xl bg-charcoal-800/30 border border-charcoal-700/50">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold uppercase text-white">{ph.provider}</span>
-                      <span
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-                          ph.status === 'healthy'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-amber-500/20 text-amber-400'
-                        }`}
-                      >
-                        {ph.status}
-                      </span>
+                  <div key={ph.provider} className="rounded-xl border border-line bg-canvas p-2.5 text-xs">
+                    <div className="font-semibold uppercase text-ink">{ph.provider}</div>
+                    <div className={ph.status === 'healthy' ? 'text-emerald-500 text-[11px]' : 'text-ink-muted text-[11px]'}>
+                      {ph.status}
                     </div>
-                    <span className="text-[10px] text-charcoal-500 block truncate mt-1">{ph.url}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-2">
+                {models.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center justify-between rounded-xl border border-line bg-canvas px-4 py-3 text-xs"
+                  >
+                    <div>
+                      <div className="font-mono font-medium text-ink">{m.id}</div>
+                      <div className="text-[11px] text-ink-muted">
+                        {m.provider} {m.size ? `• ${m.size}` : ''} • ctx {m.capabilities.context_length}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {m.capabilities.vision && (
+                        <span className="px-2 py-0.5 rounded bg-elevated text-ink-secondary text-[10px]">Vision</span>
+                      )}
+                      {m.is_default && (
+                        <span className="px-2 py-0.5 rounded bg-accent/15 text-accent text-[10px] font-medium">Default</span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Tab 3: Pull Weights */}
-        {activeTab === 'pull' && (
-          <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-            <div className="p-4 rounded-xl bg-charcoal-800/40 border border-charcoal-700/60">
-              <h3 className="text-xs font-semibold text-white mb-2 flex items-center gap-1.5">
-                <Download size={14} className="text-brand-400" />
-                <span>Pull Ollama Model Directly</span>
-              </h3>
-              <p className="text-xs text-charcoal-400 mb-4">
-                Trigger downloading GGUF open-weight models into your local Ollama runtime. Recommended for 16GB RAM: `qwen2.5:3b`, `qwen3:4b`, or `llama3.2:3b`.
-              </p>
+          {activeTab === 'cloud' && isOwner && (
+            <form onSubmit={handleSaveApiKey} className="space-y-3 text-xs">
+              <div className="flex items-center gap-2 text-ink-secondary">
+                <Shield size={14} className="text-accent" />
+                <span>Owner-only server provider configuration</span>
+              </div>
+              <select
+                value={selectedCloudProvider}
+                onChange={(e) => setSelectedCloudProvider(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border border-line bg-canvas text-ink"
+              >
+                <option value="groq">Groq</option>
+                <option value="openai">OpenAI</option>
+                <option value="deepseek">DeepSeek</option>
+              </select>
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="Enter provider API key..."
+                className="w-full px-3 py-2.5 rounded-xl border border-line bg-canvas text-ink font-mono"
+              />
+              {saveCloudStatus && <p className="text-ink-secondary">{saveCloudStatus}</p>}
+              <button
+                type="submit"
+                disabled={savingKey || !apiKeyInput.trim()}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent text-white font-medium disabled:opacity-50"
+              >
+                <Key size={13} />
+                {savingKey ? 'Saving...' : 'Configure Key'}
+              </button>
+            </form>
+          )}
 
-              <form onSubmit={handlePullModel} className="space-y-3">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={pullModelName}
-                    onChange={(e) => setPullModelName(e.target.value)}
-                    placeholder="e.g. qwen2.5:3b or llama3.2:3b"
-                    className="flex-1 bg-charcoal-800 border border-charcoal-700 rounded-xl px-3 py-2 text-xs text-white placeholder-charcoal-500 focus:outline-none focus:border-brand-500 font-mono"
-                  />
-                  <button
-                    type="submit"
-                    disabled={pulling || !pullModelName.trim()}
-                    className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-all disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    <Download size={13} />
-                    <span>{pulling ? 'Pulling...' : 'Pull Model'}</span>
-                  </button>
-                </div>
-              </form>
-
-              {pullStatus && (
-                <div className="mt-3 p-2.5 rounded-lg bg-charcoal-800 border border-charcoal-700 text-xs text-charcoal-200">
-                  {pullStatus}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+          {activeTab === 'pull' && isOwner && (
+            <form onSubmit={handlePullModel} className="space-y-3 text-xs">
+              <p className="text-ink-secondary">Pull an open-weight model into the local Ollama runtime.</p>
+              <input
+                type="text"
+                value={pullModelName}
+                onChange={(e) => setPullModelName(e.target.value)}
+                placeholder="e.g. qwen2.5:3b"
+                className="w-full px-3 py-2.5 rounded-xl border border-line bg-canvas text-ink font-mono"
+              />
+              {pullStatus && <div className="p-3 rounded-xl border border-line bg-canvas font-mono">{pullStatus}</div>}
+              <button
+                type="submit"
+                disabled={pulling}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent text-white font-medium disabled:opacity-50"
+              >
+                <Download size={13} />
+                {pulling ? 'Pulling...' : 'Download Model'}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );

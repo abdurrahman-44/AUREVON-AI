@@ -17,5 +17,6 @@ $FrontendProcess = Start-Process powershell -ArgumentList "-NoExit", "-Execution
 
 Write-Host "`nAUREVON AI is launching!" -ForegroundColor Cyan
 Write-Host "  • Web Interface: http://127.0.0.1:5173" -ForegroundColor White
+Write-Host "  • Owner Console: http://127.0.0.1:5173/admin" -ForegroundColor White
 Write-Host "  • Backend API:   http://127.0.0.1:8000" -ForegroundColor White
 Write-Host "  • API Docs:      http://127.0.0.1:8000/docs" -ForegroundColor White

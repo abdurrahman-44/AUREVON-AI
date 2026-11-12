@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Boolean,
     Integer,
+    Float,
     JSON,
     Index,
 )
@@ -27,8 +28,13 @@ class User(Base):
     username = Column(String(64), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    role = Column(String(32), default="user", nullable=False, index=True)  # user | owner
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    last_active_at = Column(DateTime, nullable=True, index=True)
+    totp_secret = Column(String(64), nullable=True)
+    totp_enabled = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
@@ -151,3 +157,156 @@ class AgentRun(Base):
     completed_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="agent_runs")
+
+
+class AIRequestLog(Base):
+    """Privacy-preserving AI request telemetry. Never stores user prompts or assistant outputs."""
+
+    __tablename__ = "ai_request_logs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
+    request_type = Column(String(32), default="chat", nullable=False, index=True)  # chat, agent, document_qa
+    provider = Column(String(64), nullable=False, index=True)
+    model = Column(String(128), nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    duration_ms = Column(Integer, nullable=True)
+    first_token_ms = Column(Integer, nullable=True)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    success = Column(Boolean, default=True, nullable=False, index=True)
+    error_category = Column(String(64), nullable=True, index=True)
+    error_message = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        Index("ix_ai_logs_created_success", "created_at", "success"),
+        Index("ix_ai_logs_provider_model", "provider", "model"),
+    )
+
+
+class SystemAIConfig(Base):
+    """Server-side centralized AUREVON Intelligence Core configuration."""
+
+    __tablename__ = "system_ai_configs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    config_key = Column(String(64), unique=True, nullable=False, default="default", index=True)
+    active_provider = Column(String(64), nullable=False, default="ollama")
+    active_model = Column(String(128), nullable=False, default="qwen2.5:3b")
+    context_window = Column(Integer, nullable=False, default=8192)
+    temperature = Column(Float, nullable=False, default=0.7)
+    allow_user_model_switching = Column(Boolean, nullable=False, default=False)
+    fallback_provider = Column(String(64), nullable=True)
+    fallback_model = Column(String(128), nullable=True)
+    enable_memory_injection = Column(Boolean, nullable=False, default=True)
+    enable_rag_injection = Column(Boolean, nullable=False, default=True)
+    enable_agent_tools = Column(Boolean, nullable=False, default=True)
+    active_prompt_version_id = Column(String(36), ForeignKey("system_prompt_versions.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class SystemPromptVersion(Base):
+    """Version-controlled AUREVON master system prompt history."""
+
+    __tablename__ = "system_prompt_versions"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
+    version_number = Column(Integer, nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    content = Column(Text, nullable=False)
+    notes = Column(String(255), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=False, index=True)
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+
+class RevokedToken(Base):
+    """Stores explicitly revoked JWT JTIs from logout to enforce true session termination."""
+
+    __tablename__ = "revoked_tokens"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    jti = Column(String(64), unique=True, nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    revoked_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+
+class AdminAuditLog(Base):
+    """Immutable audit record of sensitive owner administrative operations."""
+
+    __tablename__ = "admin_audit_logs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
+    actor_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    actor_username = Column(String(64), nullable=False)
+    action = Column(String(64), nullable=False, index=True)
+    target_type = Column(String(64), nullable=True)
+    target_id = Column(String(64), nullable=True)
+    status = Column(String(32), nullable=False, default="success", index=True)
+    summary = Column(String(255), nullable=False)
+    details = Column(JSON, nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+
+class SecurityEvent(Base):
+    """Privacy-safe authentication & authorization security telemetry."""
+
+    __tablename__ = "security_events"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    severity = Column(String(16), nullable=False, default="info", index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    identifier = Column(String(255), nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    path = Column(String(255), nullable=True)
+    detail = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+
+class APIRequestLog(Base):
+    """Sanitized HTTP API telemetry (never stores bodies, auth headers, or query secrets)."""
+
+    __tablename__ = "api_request_logs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
+    method = Column(String(16), nullable=False)
+    path = Column(String(255), nullable=False, index=True)
+    status_code = Column(Integer, nullable=False, index=True)
+    duration_ms = Column(Integer, nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    client_ip = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("ix_api_logs_created_status", "created_at", "status_code"),
+    )
+
+
+class PlatformConfig(Base):
+    """Owner-controlled runtime platform policies, rate-limit settings, and maintenance mode."""
+
+    __tablename__ = "platform_configs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    config_key = Column(String(64), unique=True, nullable=False, default="default", index=True)
+    app_display_name = Column(String(128), nullable=False, default="AUREVON AI")
+    maintenance_mode = Column(Boolean, nullable=False, default=False)
+    maintenance_message = Column(
+        String(255),
+        nullable=False,
+        default="AUREVON AI is currently undergoing scheduled maintenance. Please check back shortly.",
+    )
+    allow_public_registration = Column(Boolean, nullable=False, default=True)
+    log_retention_days = Column(Integer, nullable=False, default=30)
+    auth_rate_limit_per_min = Column(Integer, nullable=False, default=15)
+    chat_rate_limit_per_min = Column(Integer, nullable=False, default=30)
+    upload_rate_limit_per_min = Column(Integer, nullable=False, default=20)
+    enable_api_request_logging = Column(Boolean, nullable=False, default=True)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

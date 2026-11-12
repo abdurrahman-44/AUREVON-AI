@@ -1,25 +1,26 @@
 import React, { useState } from 'react';
 import {
-  Plus,
-  MessageSquare,
-  Search,
-  Trash2,
-  Edit2,
+  Bot,
+  Brain,
   Check,
-  X,
   ChevronLeft,
   ChevronRight,
-  Database,
-  Cpu,
-  RefreshCw,
-  Settings as SettingsIcon,
-  User as UserIcon,
-  LogOut,
-  LogIn,
+  Edit2,
   FileText,
-  Brain,
   Globe,
-  Bot,
+  LogIn,
+  LogOut,
+  MessageSquare,
+  Moon,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings as SettingsIcon,
+  Shield,
+  Sun,
+  Trash2,
+  User as UserIcon,
+  X,
 } from 'lucide-react';
 import { Conversation, SystemStatus, User } from '../../types';
 
@@ -42,6 +43,9 @@ interface SidebarProps {
   onOpenMemory: () => void;
   onOpenResearch: () => void;
   onOpenAgents: () => void;
+  onOpenAdmin?: () => void;
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -63,6 +67,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenMemory,
   onOpenResearch,
   onOpenAgents,
+  onOpenAdmin,
+  theme,
+  onToggleTheme,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -71,6 +78,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredConversations = conversations.filter((c) =>
     c.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const isOwner = currentUser?.role === 'owner';
+  const ollamaProvider = systemStatus?.providers?.find((p) => p.provider === 'ollama');
+  const isProviderOnline = ollamaProvider?.status === 'healthy';
 
   const startEditing = (conv: Conversation, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -98,180 +109,161 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const ollamaProvider = systemStatus?.providers.find((p) => p.provider === 'ollama');
-  const isOllamaHealthy = ollamaProvider?.status === 'healthy';
-
   if (isCollapsed) {
     return (
-      <aside className="w-16 bg-charcoal-900 border-r border-charcoal-800 flex flex-col items-center py-4 justify-between transition-all select-none">
-        <div className="flex flex-col items-center gap-3">
+      <aside className="w-14 h-full border-r border-line bg-surface flex flex-col items-center py-3.5 justify-between shrink-0">
+        <div className="flex flex-col items-center gap-2.5">
           <button
             onClick={() => setIsCollapsed(false)}
-            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-300 hover:text-white transition-colors"
-            title="Expand Sidebar"
+            className="p-2 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated transition-colors"
+            title="Expand sidebar"
           >
             <ChevronRight size={18} />
           </button>
           <button
             onClick={onNewChat}
-            className="p-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white transition-all shadow-md shadow-brand-600/30"
-            title="New Conversation"
+            className="p-2 rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors"
+            title="New conversation"
           >
             <Plus size={18} />
           </button>
-          <div className="w-8 h-[1px] bg-charcoal-800 my-1" />
-          <button
-            onClick={onOpenDocuments}
-            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-teal-400 transition-colors"
-            title="Documents (RAG)"
-          >
-            <FileText size={17} />
+
+          <div className="w-6 border-t border-line my-1" />
+
+          <button onClick={onOpenDocuments} className="p-2 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated" title="Documents">
+            <FileText size={16} />
           </button>
-          <button
-            onClick={onOpenMemory}
-            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-teal-400 transition-colors"
-            title="Long-Term Memory"
-          >
-            <Brain size={17} />
+          <button onClick={onOpenMemory} className="p-2 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated" title="Memory">
+            <Brain size={16} />
           </button>
-          <button
-            onClick={onOpenResearch}
-            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-teal-400 transition-colors"
-            title="Autonomous Web Research"
-          >
-            <Globe size={17} />
+          <button onClick={onOpenResearch} className="p-2 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated" title="Web Research">
+            <Globe size={16} />
           </button>
-          <button
-            onClick={onOpenAgents}
-            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-teal-400 transition-colors"
-            title="Autonomous Agent Runner"
-          >
-            <Bot size={17} />
+          <button onClick={onOpenAgents} className="p-2 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated" title="Agents">
+            <Bot size={16} />
           </button>
+          {isOwner && onOpenAdmin && (
+            <button onClick={onOpenAdmin} className="p-2 rounded-lg text-accent hover:bg-accent/10" title="Owner Console">
+              <Shield size={16} />
+            </button>
+          )}
         </div>
 
-        {/* Minimized bottom controls */}
-        <div className="flex flex-col items-center gap-3">
+        <div className="flex flex-col items-center gap-2">
+          <button
+            onClick={onToggleTheme}
+            className="p-2 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated"
+            title="Toggle theme"
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
           <button
             onClick={currentUser ? onOpenSettings : onOpenAuth}
-            className="p-2 rounded-xl hover:bg-charcoal-800 text-charcoal-400 hover:text-white transition-colors"
-            title={currentUser ? currentUser.username : 'Sign In'}
+            className="p-2 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated"
+            title={currentUser ? currentUser.username : 'Sign in'}
           >
-            <UserIcon size={18} />
+            <UserIcon size={16} />
           </button>
-          <div
-            className={`w-2.5 h-2.5 rounded-full ${
-              systemStatus?.database === 'connected' ? 'bg-emerald-500' : 'bg-rose-500'
-            }`}
-            title={`Database: ${systemStatus?.database || 'unknown'}`}
-          />
         </div>
       </aside>
     );
   }
 
   return (
-    <aside className="w-64 sm:w-72 bg-charcoal-900 border-r border-charcoal-800 flex flex-col justify-between transition-all select-none h-full">
-      {/* Top Section */}
-      <div className="p-3 flex flex-col gap-3">
-        {/* Header with Logo */}
-        <div className="flex items-center justify-between px-2 pt-1">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-charcoal-800 border border-charcoal-700/80 p-1 flex items-center justify-center">
-              <img src="/logo.svg" alt="AUREVON" className="w-full h-full" />
-            </div>
-            <span className="font-bold tracking-tight text-white text-sm">AUREVON AI</span>
+    <aside className="w-72 h-full border-r border-line bg-surface flex flex-col shrink-0">
+      {/* Brand Header */}
+      <div className="px-4 py-3.5 border-b border-line flex items-center justify-between">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center text-white text-xs font-semibold tracking-tight shrink-0">
+            A
           </div>
+          <div className="min-w-0">
+            <span className="block text-sm font-semibold tracking-tight text-ink leading-none">AUREVON</span>
+            <span className="block text-[10px] text-ink-muted mt-1 leading-none">Intelligence Platform</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onToggleTheme}
+            className="p-1.5 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated transition-colors"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
           <button
             onClick={() => setIsCollapsed(true)}
-            className="p-1.5 rounded-lg hover:bg-charcoal-800 text-charcoal-400 hover:text-charcoal-200 transition-colors"
-            title="Collapse Sidebar"
+            className="p-1.5 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated transition-colors"
+            title="Collapse sidebar"
           >
             <ChevronLeft size={16} />
           </button>
         </div>
+      </div>
 
-        {/* New Chat Button */}
+      {/* Primary Action */}
+      <div className="p-3 pb-2 space-y-2.5">
         <button
           onClick={onNewChat}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold tracking-wide transition-all shadow-md shadow-brand-600/20"
+          className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-medium transition-colors"
         >
           <Plus size={15} />
-          <span>New Conversation</span>
+          New Conversation
         </button>
+
+        {/* Workspace Modules */}
+        <div className="grid grid-cols-4 gap-1 pt-0.5">
+          <ToolButton icon={<FileText size={14} />} label="Docs" onClick={onOpenDocuments} />
+          <ToolButton icon={<Brain size={14} />} label="Memory" onClick={onOpenMemory} />
+          <ToolButton icon={<Globe size={14} />} label="Search" onClick={onOpenResearch} />
+          <ToolButton icon={<Bot size={14} />} label="Agents" onClick={onOpenAgents} />
+        </div>
+
+        {/* Owner-Only Console Link */}
+        {isOwner && onOpenAdmin && (
+          <button
+            onClick={onOpenAdmin}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-accent/25 bg-accent/10 text-accent hover:bg-accent/15 text-xs font-medium transition-colors"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Shield size={14} />
+              Owner Console
+            </span>
+            <span className="text-[10px] font-mono opacity-80">/admin</span>
+          </button>
+        )}
 
         {/* Search Conversations */}
         <div className="relative">
-          <Search size={14} className="absolute left-3 top-2.5 text-charcoal-500 pointer-events-none" />
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search chats..."
-            className="w-full bg-charcoal-800/60 border border-charcoal-700/50 rounded-xl pl-8 pr-3 py-1.5 text-xs text-charcoal-200 placeholder-charcoal-500 focus:outline-none focus:border-charcoal-600 transition-colors"
+            placeholder="Filter conversations..."
+            className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-line bg-canvas text-xs text-ink placeholder-ink-muted focus:outline-none focus:border-line-strong"
           />
-        </div>
-
-        {/* Intelligence Ecosystem Tools */}
-        <div className="grid grid-cols-2 gap-1.5 pt-1">
-          <button
-            onClick={onOpenDocuments}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-charcoal-800/60 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 text-[11px] text-charcoal-300 hover:text-white transition group"
-            title="Document Intelligence & RAG"
-          >
-            <FileText size={13} className="text-teal-400 shrink-0 group-hover:scale-110 transition-transform" />
-            <span className="truncate">Documents</span>
-          </button>
-          <button
-            onClick={onOpenMemory}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-charcoal-800/60 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 text-[11px] text-charcoal-300 hover:text-white transition group"
-            title="Long-Term Memory"
-          >
-            <Brain size={13} className="text-teal-400 shrink-0 group-hover:scale-110 transition-transform" />
-            <span className="truncate">Memory</span>
-          </button>
-          <button
-            onClick={onOpenResearch}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-charcoal-800/60 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 text-[11px] text-charcoal-300 hover:text-white transition group"
-            title="Autonomous Web Research"
-          >
-            <Globe size={13} className="text-teal-400 shrink-0 group-hover:scale-110 transition-transform" />
-            <span className="truncate">Research</span>
-          </button>
-          <button
-            onClick={onOpenAgents}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-charcoal-800/60 hover:bg-charcoal-800 border border-charcoal-700/50 hover:border-teal-500/50 text-[11px] text-charcoal-300 hover:text-white transition group"
-            title="Autonomous Agent Runner"
-          >
-            <Bot size={13} className="text-teal-400 shrink-0 group-hover:scale-110 transition-transform" />
-            <span className="truncate">Agents</span>
-          </button>
         </div>
       </div>
 
-      {/* Conversations List */}
-      <div className="flex-1 overflow-y-auto px-2 py-1 space-y-0.5">
-        <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-charcoal-500">
-          History ({filteredConversations.length})
-        </div>
-
+      {/* Conversation List */}
+      <div className="flex-1 overflow-y-auto px-2.5 py-1 space-y-0.5">
         {filteredConversations.length === 0 ? (
-          <div className="px-3 py-6 text-center text-xs text-charcoal-500">
-            {searchQuery ? 'No matching conversations' : 'No conversations yet'}
+          <div className="px-3 py-8 text-center text-xs text-ink-muted">
+            {searchQuery ? 'No matching threads' : 'No conversations yet'}
           </div>
         ) : (
           filteredConversations.map((conv) => {
             const isActive = conv.id === activeConversationId;
-            const isEditing = conv.id === editingId;
+            const isEditing = editingId === conv.id;
 
             return (
               <div
                 key={conv.id}
-                onClick={() => onSelectConversation(conv.id)}
-                className={`group relative flex items-center justify-between px-3 py-2 rounded-xl text-xs cursor-pointer transition-all ${
+                onClick={() => !isEditing && onSelectConversation(conv.id)}
+                className={`group flex items-center justify-between px-2.5 py-2 rounded-xl cursor-pointer transition-colors ${
                   isActive
-                    ? 'bg-charcoal-800 text-white font-medium border border-charcoal-700/80 shadow-sm'
-                    : 'text-charcoal-300 hover:bg-charcoal-800/50 hover:text-charcoal-100'
+                    ? 'bg-elevated text-ink'
+                    : 'text-ink-secondary hover:bg-elevated/60 hover:text-ink'
                 }`}
               >
                 {isEditing ? (
@@ -281,53 +273,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <input
+                      autoFocus
                       type="text"
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
-                      autoFocus
-                      className="flex-1 bg-charcoal-900 border border-brand-500 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none"
+                      className="flex-1 px-2 py-0.5 text-xs rounded border border-line-strong bg-canvas text-ink focus:outline-none"
                     />
-                    <button
-                      type="submit"
-                      className="p-1 text-emerald-400 hover:text-emerald-300"
-                      title="Save"
-                    >
-                      <Check size={13} />
+                    <button type="submit" className="p-1 text-emerald-500 hover:bg-surface rounded">
+                      <Check size={12} />
                     </button>
-                    <button
-                      type="button"
-                      onClick={cancelEditing}
-                      className="p-1 text-charcoal-400 hover:text-charcoal-200"
-                      title="Cancel"
-                    >
-                      <X size={13} />
+                    <button type="button" onClick={cancelEditing} className="p-1 text-ink-muted hover:bg-surface rounded">
+                      <X size={12} />
                     </button>
                   </form>
                 ) : (
                   <>
-                    <div className="flex items-center gap-2 min-w-0 pr-2">
-                      <MessageSquare
-                        size={14}
-                        className={isActive ? 'text-brand-400 flex-shrink-0' : 'text-charcoal-500 flex-shrink-0'}
-                      />
-                      <span className="truncate">{conv.title}</span>
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <MessageSquare size={13} className="text-ink-muted shrink-0" />
+                      <span className="text-xs truncate">{conv.title}</span>
                     </div>
-
-                    {/* Actions */}
-                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
                       <button
                         onClick={(e) => startEditing(conv, e)}
-                        className="p-1 rounded text-charcoal-400 hover:text-charcoal-200 hover:bg-charcoal-700/50"
-                        title="Rename conversation"
+                        className="p-1 rounded text-ink-muted hover:text-ink hover:bg-surface"
+                        title="Rename"
                       >
-                        <Edit2 size={12} />
+                        <Edit2 size={11} />
                       </button>
                       <button
                         onClick={(e) => handleDelete(conv.id, e)}
-                        className="p-1 rounded text-charcoal-400 hover:text-rose-400 hover:bg-charcoal-700/50"
-                        title="Delete conversation"
+                        className="p-1 rounded text-ink-muted hover:text-rose-500 hover:bg-surface"
+                        title="Delete"
                       >
-                        <Trash2 size={12} />
+                        <Trash2 size={11} />
                       </button>
                     </div>
                   </>
@@ -338,38 +316,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Footer Area: User Profile & Health */}
-      <div className="border-t border-charcoal-800 bg-charcoal-900/90 p-3 space-y-2.5">
-        {/* User Card */}
-        <div className="flex items-center justify-between px-2 py-1.5 rounded-xl bg-charcoal-800/60 border border-charcoal-700/60">
+      {/* Footer Profile & Health */}
+      <div className="p-3 border-t border-line space-y-2.5 bg-surface">
+        <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border border-line bg-canvas">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-brand-600/30 border border-brand-500/40 flex items-center justify-center text-brand-300 flex-shrink-0">
+            <div className="w-7 h-7 rounded-lg bg-elevated border border-line flex items-center justify-center text-ink-secondary shrink-0">
               <UserIcon size={14} />
             </div>
             <div className="min-w-0">
-              <span className="block text-xs font-semibold text-white truncate">
-                {currentUser ? currentUser.username : 'Guest Mode'}
-              </span>
-              <span className="block text-[10px] text-charcoal-400 truncate">
-                {currentUser ? currentUser.email : 'Local Session'}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-ink truncate">
+                  {currentUser ? currentUser.username : 'Guest Session'}
+                </span>
+                {isOwner && (
+                  <span className="px-1.5 py-0.2 rounded bg-accent/15 text-accent text-[9px] font-medium uppercase">
+                    Owner
+                  </span>
+                )}
+              </div>
+              <span className="block text-[10px] text-ink-muted truncate">
+                {currentUser ? currentUser.email : 'Local workspace'}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             {currentUser ? (
               <>
                 <button
                   onClick={onOpenSettings}
-                  className="p-1.5 rounded-lg text-charcoal-400 hover:text-white hover:bg-charcoal-700 transition-colors"
-                  title="Settings"
+                  className="p-1.5 rounded-lg text-ink-secondary hover:text-ink hover:bg-elevated transition-colors"
+                  title="Preferences"
                 >
                   <SettingsIcon size={13} />
                 </button>
                 <button
                   onClick={onLogout}
-                  className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-400 hover:bg-charcoal-700 transition-colors"
-                  title="Sign Out"
+                  className="p-1.5 rounded-lg text-ink-secondary hover:text-rose-500 hover:bg-elevated transition-colors"
+                  title="Sign out"
                 >
                   <LogOut size={13} />
                 </button>
@@ -377,34 +361,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ) : (
               <button
                 onClick={onOpenAuth}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-[11px] font-medium transition-colors"
-                title="Sign In / Register"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-elevated hover:bg-muted text-ink text-[11px] font-medium transition-colors"
               >
                 <LogIn size={11} />
-                <span>Sign In</span>
+                Sign In
               </button>
             )}
           </div>
         </div>
 
-        {/* Runtime Diagnostics */}
-        <div className="flex items-center justify-between text-[11px] text-charcoal-400 px-1">
+        <div className="flex items-center justify-between px-1 text-[11px] text-ink-muted">
           <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1">
-              <Database size={11} className="text-charcoal-500" />
-              <span className="text-[10px] text-emerald-400 font-mono">DB:OK</span>
-            </span>
-            <span className="flex items-center gap-1">
-              <Cpu size={11} className="text-charcoal-500" />
-              <span className={`text-[10px] font-mono ${isOllamaHealthy ? 'text-emerald-400' : 'text-amber-400'}`}>
-                AI:{ollamaProvider?.status || 'offline'}
-              </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isProviderOnline ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
+              <span>{isProviderOnline ? 'Runtime ready' : 'Runtime offline'}</span>
             </span>
           </div>
           <button
             onClick={onRefreshHealth}
-            className="hover:text-charcoal-200 transition-colors"
-            title="Refresh status"
+            className="p-1 rounded hover:text-ink transition-colors"
+            title="Refresh connection status"
           >
             <RefreshCw size={11} />
           </button>
@@ -413,3 +393,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </aside>
   );
 };
+
+const ToolButton: React.FC<{ icon: React.ReactNode; label: string; onClick: () => void }> = ({
+  icon,
+  label,
+  onClick,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg border border-line bg-canvas hover:bg-elevated text-ink-secondary hover:text-ink transition-colors"
+  >
+    {icon}
+    <span className="text-[10px] font-medium">{label}</span>
+  </button>
+);
