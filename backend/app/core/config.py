@@ -41,19 +41,37 @@ class Settings(BaseSettings):
     DEFAULT_PROVIDER: str = "ollama"
     OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
     DEFAULT_MODEL: str = "qwen2.5:3b"
+    DEFAULT_CODING_MODEL: Optional[str] = None
+    DEFAULT_FAST_MODEL: Optional[str] = None
     MODEL_CONTEXT_WINDOW: int = 8192
+    MAX_OUTPUT_TOKENS: int = 2048
     GENERATION_TEMPERATURE: float = 0.7
+    MODEL_KEEP_ALIVE: str = "15m"
+    KEEP_ALIVE_SECONDS: int = 900
+    AI_REQUEST_TIMEOUT_SECONDS: int = 120
+    STREAMING_ENABLED: bool = True
+    WEB_SEARCH_ENABLED: bool = False
     PIN_DEFAULT_MODEL: bool = True
     ALLOW_USER_MODEL_SWITCHING: bool = False
 
-    # Optional Cloud / Hosted Inference Provider (used when configured for production or admin override)
+    # Optional Cloud / Hosted Inference Provider (disabled by default until explicitly enabled by owner)
+    CLOUD_INFERENCE_ENABLED: bool = False
+    REQUIRE_CLOUD_CONSENT: bool = True
+    CLOUD_DAILY_REQUEST_LIMIT: int = 100
     OPENAI_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
     GROQ_API_KEY: Optional[str] = None
     DEEPSEEK_API_KEY: Optional[str] = None
     PRODUCTION_INFERENCE_PROVIDER: Optional[str] = None
     PRODUCTION_INFERENCE_URL: Optional[str] = None
     PRODUCTION_INFERENCE_API_KEY: Optional[str] = None
     PRODUCTION_DEFAULT_MODEL: Optional[str] = None
+
+    # Tool & Sandbox Engine Limits
+    TOOL_EXECUTION_TIMEOUT_SECONDS: int = 10
+    PYTHON_SANDBOX_TIMEOUT_SECONDS: int = 6
+    PYTHON_SANDBOX_MEMORY_MB: int = 128
+    MAX_TOOL_ITERATIONS: int = 3
 
     # Security & Owner Bootstrap
     SECRET_KEY: str = Field(

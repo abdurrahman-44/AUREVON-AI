@@ -2,6 +2,7 @@ from backend.app.database.session import Base
 from backend.app.models.entities import (
     User,
     Conversation,
+    ConversationSummary,
     Message,
     UserSettings,
     Memory,
@@ -16,12 +17,16 @@ from backend.app.models.entities import (
     SecurityEvent,
     APIRequestLog,
     PlatformConfig,
+    ToolConfig,
+    ToolExecutionLog,
+    ProviderUsageLog,
 )
 
 __all__ = [
     "Base",
     "User",
     "Conversation",
+    "ConversationSummary",
     "Message",
     "UserSettings",
     "Memory",
@@ -36,4 +41,7 @@ __all__ = [
     "SecurityEvent",
     "APIRequestLog",
     "PlatformConfig",
+    "ToolConfig",
+    "ToolExecutionLog",
+    "ProviderUsageLog",
 ]

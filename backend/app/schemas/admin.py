@@ -160,8 +160,18 @@ class SystemPromptCreateRequest(BaseModel):
 class SystemAIConfigResponse(BaseModel):
     active_provider: str
     active_model: str
+    coding_provider: Optional[str] = None
+    coding_model: Optional[str] = None
     context_window: int
+    max_output_tokens: int = 2048
     temperature: float
+    keep_alive_seconds: int = 900
+    request_timeout_seconds: int = 120
+    streaming_enabled: bool = True
+    web_search_enabled: bool = False
+    cloud_inference_enabled: bool = False
+    require_cloud_consent: bool = True
+    cloud_daily_limit: int = 100
     allow_user_model_switching: bool
     fallback_provider: Optional[str] = None
     fallback_model: Optional[str] = None
@@ -178,8 +188,18 @@ class SystemAIConfigResponse(BaseModel):
 class SystemAIConfigUpdateRequest(BaseModel):
     active_provider: Optional[str] = None
     active_model: Optional[str] = None
+    coding_provider: Optional[str] = None
+    coding_model: Optional[str] = None
     context_window: Optional[int] = Field(None, ge=512, le=131072)
+    max_output_tokens: Optional[int] = Field(None, ge=64, le=16384)
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
+    keep_alive_seconds: Optional[int] = Field(None, ge=0, le=86400)
+    request_timeout_seconds: Optional[int] = Field(None, ge=10, le=600)
+    streaming_enabled: Optional[bool] = None
+    web_search_enabled: Optional[bool] = None
+    cloud_inference_enabled: Optional[bool] = None
+    require_cloud_consent: Optional[bool] = None
+    cloud_daily_limit: Optional[int] = Field(None, ge=1, le=100000)
     allow_user_model_switching: Optional[bool] = None
     fallback_provider: Optional[str] = None
     fallback_model: Optional[str] = None
@@ -194,7 +214,12 @@ class PublicIntelligenceResponse(BaseModel):
     active_model: str
     allow_user_model_switching: bool
     context_window: int
+    max_output_tokens: int = 2048
     temperature: float
+    streaming_enabled: bool = True
+    web_search_enabled: bool = False
+    cloud_inference_enabled: bool = False
+    require_cloud_consent: bool = True
     enable_memory_injection: bool
     enable_rag_injection: bool
     enable_agent_tools: bool
@@ -394,3 +419,24 @@ class PlatformConfigUpdateRequest(BaseModel):
     chat_rate_limit_per_min: Optional[int] = Field(None, ge=5, le=300)
     upload_rate_limit_per_min: Optional[int] = Field(None, ge=2, le=300)
     enable_api_request_logging: Optional[bool] = None
+
+
+class ModelSelectRequest(BaseModel):
+    active_provider: str = Field(..., min_length=2, max_length=64)
+    active_model: str = Field(..., min_length=1, max_length=128)
+    coding_provider: Optional[str] = Field(None, max_length=64)
+    coding_model: Optional[str] = Field(None, max_length=128)
+    fallback_provider: Optional[str] = Field(None, max_length=64)
+    fallback_model: Optional[str] = Field(None, max_length=128)
+    context_window: Optional[int] = Field(None, ge=512, le=131072)
+    max_output_tokens: Optional[int] = Field(None, ge=64, le=16384)
+    keep_alive_seconds: Optional[int] = Field(None, ge=0, le=86400)
+    request_timeout_seconds: Optional[int] = Field(None, ge=10, le=600)
+    streaming_enabled: Optional[bool] = None
+
+
+class ToolConfigUpdateRequest(BaseModel):
+    is_enabled: Optional[bool] = None
+    permission_level: Optional[str] = Field(None, pattern="^(standard|owner_only|disabled)$")
+    timeout_seconds: Optional[int] = Field(None, ge=1, le=30)
+    max_calls_per_request: Optional[int] = Field(None, ge=1, le=10)

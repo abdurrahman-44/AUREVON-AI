@@ -68,8 +68,18 @@ class IntelligenceCoreService:
                 config_key="default",
                 active_provider=default_provider,
                 active_model=default_model,
+                coding_provider=None,
+                coding_model=settings.DEFAULT_CODING_MODEL,
                 context_window=settings.MODEL_CONTEXT_WINDOW,
+                max_output_tokens=settings.MAX_OUTPUT_TOKENS,
                 temperature=settings.GENERATION_TEMPERATURE,
+                keep_alive_seconds=settings.KEEP_ALIVE_SECONDS,
+                request_timeout_seconds=settings.AI_REQUEST_TIMEOUT_SECONDS,
+                streaming_enabled=settings.STREAMING_ENABLED,
+                web_search_enabled=settings.WEB_SEARCH_ENABLED,
+                cloud_inference_enabled=settings.CLOUD_INFERENCE_ENABLED,
+                require_cloud_consent=settings.REQUIRE_CLOUD_CONSENT,
+                cloud_daily_limit=settings.CLOUD_DAILY_REQUEST_LIMIT,
                 allow_user_model_switching=settings.ALLOW_USER_MODEL_SWITCHING,
                 fallback_provider=None,
                 fallback_model=None,
@@ -148,6 +158,12 @@ class IntelligenceCoreService:
             "provider": resolved_provider,
             "model": resolved_model,
             "context_window": config.context_window,
+            "max_output_tokens": int(config.max_output_tokens or settings.MAX_OUTPUT_TOKENS),
+            "keep_alive": f"{int(config.keep_alive_seconds if config.keep_alive_seconds is not None else settings.KEEP_ALIVE_SECONDS)}s",
+            "keep_alive_seconds": int(config.keep_alive_seconds if config.keep_alive_seconds is not None else settings.KEEP_ALIVE_SECONDS),
+            "request_timeout_seconds": int(config.request_timeout_seconds or settings.AI_REQUEST_TIMEOUT_SECONDS),
+            "streaming_enabled": bool(config.streaming_enabled),
+            "web_search_enabled": bool(config.web_search_enabled),
             "temperature": resolved_temp,
             "master_prompt": master_prompt,
             "config": config,
@@ -165,7 +181,12 @@ class IntelligenceCoreService:
             active_model=config.active_model,
             allow_user_model_switching=config.allow_user_model_switching,
             context_window=config.context_window,
+            max_output_tokens=int(config.max_output_tokens or 2048),
             temperature=config.temperature,
+            streaming_enabled=bool(config.streaming_enabled),
+            web_search_enabled=bool(config.web_search_enabled),
+            cloud_inference_enabled=bool(config.cloud_inference_enabled),
+            require_cloud_consent=bool(config.require_cloud_consent),
             enable_memory_injection=config.enable_memory_injection,
             enable_rag_injection=config.enable_rag_injection,
             enable_agent_tools=config.enable_agent_tools,
@@ -185,8 +206,18 @@ class IntelligenceCoreService:
         return SystemAIConfigResponse(
             active_provider=config.active_provider,
             active_model=config.active_model,
+            coding_provider=config.coding_provider,
+            coding_model=config.coding_model,
             context_window=config.context_window,
+            max_output_tokens=int(config.max_output_tokens or 2048),
             temperature=config.temperature,
+            keep_alive_seconds=int(config.keep_alive_seconds if config.keep_alive_seconds is not None else 900),
+            request_timeout_seconds=int(config.request_timeout_seconds or 120),
+            streaming_enabled=bool(config.streaming_enabled),
+            web_search_enabled=bool(config.web_search_enabled),
+            cloud_inference_enabled=bool(config.cloud_inference_enabled),
+            require_cloud_consent=bool(config.require_cloud_consent),
+            cloud_daily_limit=int(config.cloud_daily_limit or 100),
             allow_user_model_switching=config.allow_user_model_switching,
             fallback_provider=config.fallback_provider,
             fallback_model=config.fallback_model,
@@ -213,10 +244,30 @@ class IntelligenceCoreService:
             config.active_provider = payload.active_provider.strip().lower()
         if payload.active_model is not None and payload.active_model.strip():
             config.active_model = payload.active_model.strip()
+        if payload.coding_provider is not None:
+            config.coding_provider = payload.coding_provider.strip().lower() or None
+        if payload.coding_model is not None:
+            config.coding_model = payload.coding_model.strip() or None
         if payload.context_window is not None:
             config.context_window = payload.context_window
+        if payload.max_output_tokens is not None:
+            config.max_output_tokens = payload.max_output_tokens
         if payload.temperature is not None:
             config.temperature = payload.temperature
+        if payload.keep_alive_seconds is not None:
+            config.keep_alive_seconds = payload.keep_alive_seconds
+        if payload.request_timeout_seconds is not None:
+            config.request_timeout_seconds = payload.request_timeout_seconds
+        if payload.streaming_enabled is not None:
+            config.streaming_enabled = payload.streaming_enabled
+        if payload.web_search_enabled is not None:
+            config.web_search_enabled = payload.web_search_enabled
+        if payload.cloud_inference_enabled is not None:
+            config.cloud_inference_enabled = payload.cloud_inference_enabled
+        if payload.require_cloud_consent is not None:
+            config.require_cloud_consent = payload.require_cloud_consent
+        if payload.cloud_daily_limit is not None:
+            config.cloud_daily_limit = payload.cloud_daily_limit
         if payload.allow_user_model_switching is not None:
             config.allow_user_model_switching = payload.allow_user_model_switching
         if payload.fallback_provider is not None:

@@ -156,22 +156,36 @@ class OllamaProvider(BaseAIProvider):
         model: str,
         temperature: float = 0.7,
         context_window: int = 8192,
+        max_tokens: Optional[int] = None,
+        keep_alive: Optional[str] = None,
+        request_timeout: Optional[int] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        payload = {
+        options: Dict[str, Any] = {
+            "temperature": temperature,
+            "num_ctx": context_window or settings.MODEL_CONTEXT_WINDOW,
+        }
+        if max_tokens and max_tokens > 0:
+            options["num_predict"] = int(max_tokens)
+
+        payload: Dict[str, Any] = {
             "model": model or settings.DEFAULT_MODEL,
             "messages": messages,
             "stream": True,
-            "options": {
-                "temperature": temperature,
-                "num_ctx": context_window or settings.MODEL_CONTEXT_WINDOW,
-            },
+            "keep_alive": keep_alive or settings.MODEL_KEEP_ALIVE,
+            "options": options,
         }
+
+        timeout_cfg = (
+            httpx.Timeout(connect=1.5, read=float(request_timeout), write=5.0, pool=5.0)
+            if request_timeout and request_timeout > 0
+            else self.timeout
+        )
 
         prompt_tokens: Optional[int] = None
         completion_tokens: Optional[int] = None
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout_cfg) as client:
                 async with client.stream(
                     "POST",
                     f"{self.base_url}/api/chat",

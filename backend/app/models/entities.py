@@ -56,6 +56,7 @@ class Conversation(Base):
     # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan", order_by="Message.created_at")
+    summary = relationship("ConversationSummary", back_populates="conversation", uselist=False, cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_conversations_user_updated", "user_id", "updated_at"),
@@ -71,6 +72,9 @@ class Message(Base):
     content = Column(Text, nullable=False)
     model = Column(String(128), nullable=True)
     token_usage = Column(JSON, nullable=True)
+    tool_calls = Column(JSON, nullable=True)
+    citations = Column(JSON, nullable=True)
+    intent = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
     # Relationships
@@ -118,6 +122,7 @@ class Document(Base):
     filename = Column(String(255), nullable=False)
     file_type = Column(String(32), nullable=False)
     file_size_bytes = Column(Integer, default=0, nullable=False)
+    content_hash = Column(String(64), nullable=True, index=True)
     storage_path = Column(String(512), nullable=False)
     processing_status = Column(String(32), default="pending", nullable=False)  # pending, processing, completed, failed
     chunk_count = Column(Integer, default=0, nullable=False)
@@ -179,6 +184,8 @@ class AIRequestLog(Base):
     success = Column(Boolean, default=True, nullable=False, index=True)
     error_category = Column(String(64), nullable=True, index=True)
     error_message = Column(String(255), nullable=True)
+    intent = Column(String(64), nullable=True, index=True)
+    tools_used = Column(JSON, nullable=True)
 
     __table_args__ = (
         Index("ix_ai_logs_created_success", "created_at", "success"),
@@ -195,8 +202,18 @@ class SystemAIConfig(Base):
     config_key = Column(String(64), unique=True, nullable=False, default="default", index=True)
     active_provider = Column(String(64), nullable=False, default="ollama")
     active_model = Column(String(128), nullable=False, default="qwen2.5:3b")
+    coding_provider = Column(String(64), nullable=True)
+    coding_model = Column(String(128), nullable=True)
     context_window = Column(Integer, nullable=False, default=8192)
+    max_output_tokens = Column(Integer, nullable=False, default=2048)
     temperature = Column(Float, nullable=False, default=0.7)
+    keep_alive_seconds = Column(Integer, nullable=False, default=900)
+    request_timeout_seconds = Column(Integer, nullable=False, default=120)
+    streaming_enabled = Column(Boolean, nullable=False, default=True)
+    web_search_enabled = Column(Boolean, nullable=False, default=False)
+    cloud_inference_enabled = Column(Boolean, nullable=False, default=False)
+    require_cloud_consent = Column(Boolean, nullable=False, default=True)
+    cloud_daily_limit = Column(Integer, nullable=False, default=100)
     allow_user_model_switching = Column(Boolean, nullable=False, default=False)
     fallback_provider = Column(String(64), nullable=True)
     fallback_model = Column(String(128), nullable=True)
@@ -310,3 +327,70 @@ class PlatformConfig(Base):
     enable_api_request_logging = Column(Boolean, nullable=False, default=True)
     updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class ConversationSummary(Base):
+    """Rolling summary of older conversation turns so long chats preserve context without blowing token limits."""
+
+    __tablename__ = "conversation_summaries"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    summary_text = Column(Text, nullable=False, default="")
+    summarized_message_count = Column(Integer, nullable=False, default=0)
+    last_message_id = Column(String(36), nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    conversation = relationship("Conversation", back_populates="summary")
+
+
+class ToolConfig(Base):
+    """Owner-governed tool toggle, permission tier, and execution limits."""
+
+    __tablename__ = "tool_configs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    tool_name = Column(String(64), unique=True, nullable=False, index=True)
+    display_name = Column(String(128), nullable=False)
+    description = Column(String(255), nullable=False)
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    permission_level = Column(String(32), nullable=False, default="standard")  # standard | owner_only | disabled
+    timeout_seconds = Column(Integer, nullable=False, default=10)
+    max_calls_per_request = Column(Integer, nullable=False, default=3)
+    updated_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class ToolExecutionLog(Base):
+    """Privacy-safe telemetry log for tool executions inside chat/agent pipelines."""
+
+    __tablename__ = "tool_execution_logs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
+    tool_name = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(String(32), nullable=False, default="success", index=True)  # success | error | timeout | blocked
+    duration_ms = Column(Integer, nullable=False, default=0)
+    error_summary = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+
+class ProviderUsageLog(Base):
+    """Tracks local & optional cloud provider token usage, consent, and cost estimates."""
+
+    __tablename__ = "provider_usage_logs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
+    provider = Column(String(64), nullable=False, index=True)
+    model = Column(String(128), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    is_cloud = Column(Boolean, nullable=False, default=False, index=True)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    estimated_cost_usd = Column(Float, nullable=False, default=0.0)
+    consent_granted = Column(Boolean, nullable=False, default=False)
+    success = Column(Boolean, nullable=False, default=True, index=True)
+    latency_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)

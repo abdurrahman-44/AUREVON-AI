@@ -15,8 +15,10 @@ import {
   PaginatedSecurityEventsResponse,
   PaginatedUsersResponse,
   PlatformConfigResponse,
+  CitationItem,
   PublicIntelligenceConfig,
   SystemAIConfigResponse,
+  ToolCallEvent,
   SystemDiagnosticsResponse,
   SystemMonitoringResponse,
   SystemStatus,
@@ -282,6 +284,84 @@ export async function configureCloudProvider(provider: string, apiKey: string): 
     body: JSON.stringify({ provider, api_key: apiKey }),
   });
   if (!res.ok) throw new Error(await parseError(res, 'Failed to configure provider'));
+  return res.json();
+}
+
+export async function fetchAdminAIModels(): Promise<any> {
+  const res = await fetch(`${API_BASE}/admin/ai/models`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to discover models'));
+  return res.json();
+}
+
+export async function selectAdminAIModel(payload: Record<string, any>): Promise<SystemAIConfigResponse> {
+  const res = await fetch(`${API_BASE}/admin/ai/models/select`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to select model'));
+  return res.json();
+}
+
+export async function fetchAdminAITools(): Promise<any> {
+  const res = await fetch(`${API_BASE}/admin/ai/tools`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load AI tools'));
+  return res.json();
+}
+
+export async function updateAdminAITool(toolName: string, payload: Record<string, any>): Promise<any> {
+  const res = await fetch(`${API_BASE}/admin/ai/tools/${encodeURIComponent(toolName)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to update tool configuration'));
+  return res.json();
+}
+
+export async function fetchAdminAIKnowledge(): Promise<any> {
+  const res = await fetch(`${API_BASE}/admin/ai/knowledge`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load knowledge index'));
+  return res.json();
+}
+
+export async function rebuildAdminKnowledgeIndex(): Promise<any> {
+  const res = await fetch(`${API_BASE}/admin/ai/knowledge/rebuild`, {
+    method: 'POST',
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to rebuild knowledge index'));
+  return res.json();
+}
+
+export async function deleteAdminKnowledgeDoc(docId: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/admin/ai/knowledge/${encodeURIComponent(docId)}`, {
+    method: 'DELETE',
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to remove document'));
+  return res.json();
+}
+
+export async function fetchAdminAIProviders(): Promise<any> {
+  const res = await fetch(`${API_BASE}/admin/ai/providers`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load provider usage'));
+  return res.json();
+}
+
+export async function fetchAdminAIPerformance(range: '24h' | '7d' | '30d' = '7d'): Promise<any> {
+  const res = await fetch(`${API_BASE}/admin/ai/performance?range_key=${range}`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!res.ok) throw new Error(await parseError(res, 'Failed to load AI performance metrics'));
   return res.json();
 }
 
@@ -675,21 +755,33 @@ export interface StreamChatParams {
   model?: string;
   temperature?: number;
   images?: string[];
+  documentIds?: string[];
+  webSearch?: boolean;
+  allowCloud?: boolean;
+  regenerate?: boolean;
   abortSignal?: AbortSignal;
   onChunk: (delta: string) => void;
+  onStatus?: (status: string) => void;
+  onToolEvent?: (toolEvent: ToolCallEvent) => void;
+  onCitations?: (citations: CitationItem[]) => void;
+  onCharts?: (charts: string[]) => void;
   onInit?: (data: {
     conversation_id: string;
     user_message_id: string;
     model?: string;
     provider?: string;
     model_pinned?: boolean;
+    intent?: string;
   }) => void;
   onDone?: (data: {
     conversation_id: string;
     assistant_message_id: string;
     model?: string;
     provider?: string;
+    intent?: string;
     token_usage?: Record<string, any> | null;
+    citations?: CitationItem[] | null;
+    tools_used?: ToolCallEvent[] | null;
   }) => void;
   onError?: (error: Error) => void;
 }
@@ -700,8 +792,16 @@ export async function streamChat({
   model,
   temperature = 0.7,
   images,
+  documentIds,
+  webSearch = false,
+  allowCloud = false,
+  regenerate = false,
   abortSignal,
   onChunk,
+  onStatus,
+  onToolEvent,
+  onCitations,
+  onCharts,
   onInit,
   onDone,
   onError,
@@ -720,6 +820,10 @@ export async function streamChat({
         model,
         temperature,
         images,
+        document_ids: documentIds && documentIds.length > 0 ? documentIds : undefined,
+        web_search: webSearch,
+        allow_cloud: allowCloud,
+        regenerate,
         stream: true,
       }),
       signal: abortSignal,
@@ -754,6 +858,18 @@ export async function streamChat({
             const data = JSON.parse(jsonStr);
             if (data.user_message_id && onInit) {
               onInit(data);
+            }
+            if (data.status && onStatus) {
+              onStatus(data.status);
+            }
+            if (data.tool_event && onToolEvent) {
+              onToolEvent(data.tool_event);
+            }
+            if (Array.isArray(data.citations) && onCitations) {
+              onCitations(data.citations);
+            }
+            if (Array.isArray(data.charts) && onCharts) {
+              onCharts(data.charts);
             }
             if (data.delta) {
               onChunk(data.delta);

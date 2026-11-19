@@ -1,53 +1,57 @@
 import math
 import re
 import hashlib
-from typing import List
-import httpx
-from backend.app.core.config import settings
+from typing import List, Set
 
 VECTOR_DIM = 128
 
+_STOPWORDS: Set[str] = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
+    "has", "have", "he", "in", "is", "it", "its", "of", "on", "or", "she",
+    "that", "the", "their", "there", "these", "they", "this", "to", "was",
+    "were", "will", "with", "you", "your",
+}
+
 
 class EmbeddingService:
-    """Generates normalized vector representations and computes similarity."""
+    """Fast local semantic vector generator without slow generation-model /api/embeddings calls."""
+
+    @classmethod
+    def extract_keywords(cls, text: str) -> List[str]:
+        tokens = re.findall(r"[A-Za-z0-9_]+", (text or "").lower())
+        return [t for t in tokens if len(t) >= 2 and t not in _STOPWORDS]
 
     @classmethod
     async def get_embedding(cls, text: str) -> List[float]:
-        """Try Ollama embedding first, fallback to deterministic semantic feature hashing."""
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                res = await client.post(
-                    f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/embeddings",
-                    json={"model": settings.DEFAULT_MODEL, "prompt": text[:500]},
-                )
-                if res.status_code == 200:
-                    data = res.json()
-                    emb = data.get("embedding")
-                    if emb and isinstance(emb, list):
-                        return cls._normalize(emb[:VECTOR_DIM] if len(emb) >= VECTOR_DIM else emb + [0.0]*(VECTOR_DIM - len(emb)))
-        except Exception:
-            pass
-
-        # High-performance, zero-dependency deterministic semantic vector
+        """Compute deterministic weighted semantic feature vector in sub-millisecond local CPU time."""
         return cls._compute_feature_vector(text)
 
     @classmethod
     def _compute_feature_vector(cls, text: str) -> List[float]:
         vec = [0.0] * VECTOR_DIM
-        tokens = re.findall(r"\w+", text.lower())
+        tokens = re.findall(r"[A-Za-z0-9_]+", (text or "").lower())
         if not tokens:
             return vec
 
-        for i, token in enumerate(tokens):
-            # Unigram hash
+        filtered = [t for t in tokens if t not in _STOPWORDS] or tokens
+
+        for i, token in enumerate(filtered):
+            weight = 1.35 if len(token) >= 5 else 1.0
             h1 = int(hashlib.md5(token.encode("utf-8")).hexdigest()[:8], 16) % VECTOR_DIM
-            vec[h1] += 1.0
+            vec[h1] += weight
+
+            # Character trigram overlap helps match partial/inflected terms accurately
+            if len(token) >= 4:
+                for k in range(len(token) - 2):
+                    tri = f"~{token[k:k+3]}"
+                    ht = int(hashlib.md5(tri.encode("utf-8")).hexdigest()[:8], 16) % VECTOR_DIM
+                    vec[ht] += 0.35
 
             # Bigram hash
-            if i < len(tokens) - 1:
-                bigram = f"{token}_{tokens[i+1]}"
+            if i < len(filtered) - 1:
+                bigram = f"{token}_{filtered[i+1]}"
                 h2 = int(hashlib.md5(bigram.encode("utf-8")).hexdigest()[:8], 16) % VECTOR_DIM
-                vec[h2] += 1.5
+                vec[h2] += 1.6
 
         return cls._normalize(vec)
 

@@ -2,19 +2,35 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ChevronDown,
+  Cloud,
+  FileText,
+  Globe,
   Image as ImageIcon,
+  Loader2,
   Lock,
+  Paperclip,
   Send,
   Sliders,
   Square,
   X,
 } from 'lucide-react';
+import { uploadDocument } from '../../services/api';
 import { ModelInfo } from '../../types';
+
+export interface AttachedDocBadge {
+  id: string;
+  filename: string;
+  chunk_count?: number;
+}
 
 interface ComposerProps {
   input: string;
   setInput: (value: string) => void;
-  onSend: (text?: string, images?: string[]) => void;
+  onSend: (
+    text?: string,
+    images?: string[],
+    options?: { documentIds?: string[]; webSearch?: boolean; allowCloud?: boolean }
+  ) => void;
   onStop: () => void;
   isStreaming: boolean;
   selectedModel: string;
@@ -23,6 +39,7 @@ interface ComposerProps {
   allowModelSwitching: boolean;
   canManageModels?: boolean;
   onOpenModelManagement?: () => void;
+  cloudAvailable?: boolean;
   disabled?: boolean;
 }
 
@@ -38,11 +55,18 @@ export const Composer: React.FC<ComposerProps> = ({
   allowModelSwitching,
   canManageModels = false,
   onOpenModelManagement,
+  cloudAvailable = false,
   disabled = false,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [attachedDocs, setAttachedDocs] = useState<AttachedDocBadge[]>([]);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [allowCloud, setAllowCloud] = useState(false);
 
   const activeModel = models.find((m) => m.id === selectedModel);
   const supportsVision = activeModel?.capabilities?.vision ?? false;
@@ -55,9 +79,20 @@ export const Composer: React.FC<ComposerProps> = ({
   }, [input]);
 
   const handleTriggerSend = () => {
-    if (!isStreaming && (input.trim() || attachedImages.length > 0)) {
-      onSend(input, attachedImages.length > 0 ? attachedImages : undefined);
+    if (!isStreaming && !uploadingDoc && (input.trim() || attachedImages.length > 0 || attachedDocs.length > 0)) {
+      const promptText =
+        input.trim() ||
+        (attachedDocs.length > 0
+          ? `Summarize and analyze the attached document${attachedDocs.length > 1 ? 's' : ''}: ${attachedDocs.map((d) => d.filename).join(', ')}`
+          : input);
+      onSend(promptText, attachedImages.length > 0 ? attachedImages : undefined, {
+        documentIds: attachedDocs.length > 0 ? attachedDocs.map((d) => d.id) : undefined,
+        webSearch: webSearchEnabled,
+        allowCloud,
+      });
       setAttachedImages([]);
+      setAttachedDocs([]);
+      setAttachError(null);
     }
   };
 
@@ -72,7 +107,7 @@ export const Composer: React.FC<ComposerProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      alert('Please select an image file.');
+      setAttachError('Please select a valid image file.');
       return;
     }
     const reader = new FileReader();
@@ -85,14 +120,37 @@ export const Composer: React.FC<ComposerProps> = ({
     e.target.value = '';
   };
 
+  const handleDocumentSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAttachError(null);
+    setUploadingDoc(true);
+    try {
+      const uploaded = await uploadDocument(file);
+      setAttachedDocs((prev) => [
+        ...prev.filter((d) => d.id !== uploaded.id),
+        { id: uploaded.id, filename: uploaded.filename, chunk_count: uploaded.chunk_count },
+      ]);
+    } catch (err: any) {
+      setAttachError(err.message || 'Failed to upload attached document');
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
   const removeImage = (index: number) => {
     setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const removeDoc = (docId: string) => {
+    setAttachedDocs((prev) => prev.filter((d) => d.id !== docId));
   };
 
   return (
     <div className="px-4 sm:px-6 pb-4 pt-2 max-w-3xl w-full mx-auto">
       <div className="rounded-2xl border border-line bg-surface shadow-sm focus-within:border-line-strong transition-colors">
-        {attachedImages.length > 0 && (
+        {(attachedImages.length > 0 || attachedDocs.length > 0 || attachError) && (
           <div className="px-3.5 pt-3 flex flex-wrap items-center gap-2">
             {attachedImages.map((imgSrc, idx) => (
               <div key={idx} className="relative rounded-xl overflow-hidden border border-line bg-elevated">
@@ -101,16 +159,45 @@ export const Composer: React.FC<ComposerProps> = ({
                   type="button"
                   onClick={() => removeImage(idx)}
                   className="absolute top-1 right-1 p-0.5 rounded-full bg-black/75 text-white hover:bg-rose-600"
-                  title="Remove attachment"
+                  title="Remove image attachment"
                 >
                   <X size={11} />
                 </button>
               </div>
             ))}
-            {!supportsVision && (
+
+            {attachedDocs.map((doc) => (
+              <div
+                key={doc.id}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-accent/30 bg-accent/10 text-xs text-ink"
+              >
+                <FileText size={13} className="text-accent shrink-0" />
+                <span className="max-w-[160px] truncate font-medium">{doc.filename}</span>
+                {doc.chunk_count !== undefined && (
+                  <span className="text-[10px] text-ink-muted">({doc.chunk_count})</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeDoc(doc.id)}
+                  className="text-ink-muted hover:text-rose-500 ml-0.5"
+                  title="Detach document"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+
+            {attachedImages.length > 0 && !supportsVision && (
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-500 text-xs">
                 <AlertTriangle size={12} />
                 <span>Active model `{selectedModel}` is text-only.</span>
+              </div>
+            )}
+
+            {attachError && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-500 text-xs">
+                <AlertTriangle size={12} />
+                <span>{attachError}</span>
               </div>
             )}
           </div>
@@ -129,14 +216,21 @@ export const Composer: React.FC<ComposerProps> = ({
 
         <input
           type="file"
-          ref={fileInputRef}
+          ref={imageInputRef}
           onChange={handleImageSelect}
           accept="image/*"
           className="hidden"
         />
+        <input
+          type="file"
+          ref={docInputRef}
+          onChange={handleDocumentSelect}
+          accept=".pdf,.docx,.xlsx,.txt,.md,.csv,.json,.py,.js,.ts,.log"
+          className="hidden"
+        />
 
-        <div className="px-3 pb-2.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
+        <div className="px-3 pb-2.5 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {allowModelSwitching ? (
               <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-line bg-canvas text-xs text-ink-secondary">
                 <select
@@ -164,12 +258,53 @@ export const Composer: React.FC<ComposerProps> = ({
 
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => docInputRef.current?.click()}
+              disabled={uploadingDoc || isStreaming}
+              className="inline-flex items-center gap-1 p-1.5 px-2 rounded-lg border border-line bg-canvas text-xs text-ink-muted hover:text-ink transition-colors disabled:opacity-50"
+              title="Attach document (.pdf, .docx, .xlsx, .csv, .txt, code)"
+            >
+              {uploadingDoc ? <Loader2 size={13} className="animate-spin text-accent" /> : <Paperclip size={13} />}
+              <span className="hidden sm:inline text-[11px]">Attach</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
               className="p-1.5 rounded-lg border border-line bg-canvas text-ink-muted hover:text-ink transition-colors"
               title="Attach image"
             >
               <ImageIcon size={14} />
             </button>
+
+            <button
+              type="button"
+              onClick={() => setWebSearchEnabled((v) => !v)}
+              className={`inline-flex items-center gap-1 p-1.5 px-2 rounded-lg border text-[11px] transition-colors ${
+                webSearchEnabled
+                  ? 'border-accent/50 bg-accent/15 text-accent font-medium'
+                  : 'border-line bg-canvas text-ink-muted hover:text-ink'
+              }`}
+              title="Toggle live web search for this turn"
+            >
+              <Globe size={13} />
+              <span className="hidden sm:inline">Web</span>
+            </button>
+
+            {cloudAvailable && (
+              <button
+                type="button"
+                onClick={() => setAllowCloud((v) => !v)}
+                className={`inline-flex items-center gap-1 p-1.5 px-2 rounded-lg border text-[11px] transition-colors ${
+                  allowCloud
+                    ? 'border-amber-500/50 bg-amber-500/15 text-amber-500 font-medium'
+                    : 'border-line bg-canvas text-ink-muted hover:text-ink'
+                }`}
+                title="Explicit consent to allow optional cloud inference for this turn"
+              >
+                <Cloud size={13} />
+                <span className="hidden sm:inline">Cloud OK</span>
+              </button>
+            )}
 
             {canManageModels && onOpenModelManagement && (
               <button
@@ -196,9 +331,13 @@ export const Composer: React.FC<ComposerProps> = ({
             <button
               type="button"
               onClick={handleTriggerSend}
-              disabled={(!input.trim() && attachedImages.length === 0) || disabled}
+              disabled={
+                (!input.trim() && attachedImages.length === 0 && attachedDocs.length === 0) ||
+                uploadingDoc ||
+                disabled
+              }
               className={`p-2 rounded-xl transition-colors ${
-                (input.trim() || attachedImages.length > 0) && !disabled
+                (input.trim() || attachedImages.length > 0 || attachedDocs.length > 0) && !uploadingDoc && !disabled
                   ? 'bg-accent hover:bg-accent-hover text-white'
                   : 'bg-elevated text-ink-muted cursor-not-allowed'
               }`}
@@ -211,7 +350,7 @@ export const Composer: React.FC<ComposerProps> = ({
       </div>
 
       <p className="text-[11px] text-center text-ink-muted mt-2">
-        AUREVON AI may make mistakes. Verify critical information independently.
+        AUREVON AI runs local-first inference. Verify critical outputs and citations independently.
       </p>
     </div>
   );

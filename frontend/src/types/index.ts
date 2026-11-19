@@ -34,10 +34,37 @@ export interface PublicIntelligenceConfig {
   active_model: string;
   allow_user_model_switching: boolean;
   context_window: number;
+  max_output_tokens?: number;
   temperature: number;
+  streaming_enabled?: boolean;
+  web_search_enabled?: boolean;
+  cloud_inference_enabled?: boolean;
+  require_cloud_consent?: boolean;
   enable_memory_injection: boolean;
   enable_rag_injection: boolean;
   enable_agent_tools: boolean;
+}
+
+export interface ToolCallEvent {
+  tool: string;
+  status: string;
+  duration_ms?: number;
+  ok?: boolean;
+  result?: any;
+  converted?: any;
+  formatted?: string;
+  error?: string;
+}
+
+export interface CitationItem {
+  source_type: 'document' | 'web';
+  document_id?: string;
+  filename?: string;
+  page_number?: number | null;
+  similarity?: number;
+  title?: string;
+  url?: string;
+  snippet?: string;
 }
 
 export interface Message {
@@ -51,6 +78,10 @@ export interface Message {
     completion_tokens?: number | null;
     total_tokens?: number | null;
   } | null;
+  tool_calls?: ToolCallEvent[] | null;
+  citations?: CitationItem[] | null;
+  charts?: string[] | null;
+  intent?: string | null;
   created_at: string;
 }
 
@@ -249,8 +280,18 @@ export interface SystemPromptVersion {
 export interface SystemAIConfigResponse {
   active_provider: string;
   active_model: string;
+  coding_provider?: string | null;
+  coding_model?: string | null;
   context_window: number;
+  max_output_tokens?: number;
   temperature: number;
+  keep_alive_seconds?: number;
+  request_timeout_seconds?: number;
+  streaming_enabled?: boolean;
+  web_search_enabled?: boolean;
+  cloud_inference_enabled?: boolean;
+  require_cloud_consent?: boolean;
+  cloud_daily_limit?: number;
   allow_user_model_switching: boolean;
   fallback_provider?: string | null;
   fallback_model?: string | null;
@@ -270,6 +311,11 @@ export type AdminSectionRoute =
   | '/admin'
   | '/admin/terminal'
   | '/admin/ai'
+  | '/admin/ai/models'
+  | '/admin/ai/tools'
+  | '/admin/ai/performance'
+  | '/admin/ai/knowledge'
+  | '/admin/ai/providers'
   | '/admin/users'
   | '/admin/system'
   | '/admin/logs'

@@ -75,9 +75,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
 
-  const filteredConversations = conversations.filter((c) =>
-    c.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredConversations = conversations.filter((c) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      c.title.toLowerCase().includes(q) ||
+      (c.last_message_preview || '').toLowerCase().includes(q)
+    );
+  });
 
   const isOwner = currentUser?.role === 'owner';
   const ollamaProvider = systemStatus?.providers?.find((p) => p.provider === 'ollama');
@@ -240,8 +245,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Filter conversations..."
-            className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-line bg-canvas text-xs text-ink placeholder-ink-muted focus:outline-none focus:border-line-strong"
+            className="w-full pl-8 pr-7 py-1.5 rounded-lg border border-line bg-canvas text-xs text-ink placeholder-ink-muted focus:outline-none focus:border-line-strong"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-muted hover:text-ink"
+              title="Clear filter"
+            >
+              <X size={12} />
+            </button>
+          )}
         </div>
       </div>
 

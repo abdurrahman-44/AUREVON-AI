@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import inspect
 from typing import AsyncGenerator, List, Dict, Any, Optional
 from backend.app.schemas.model import ModelInfo, ProviderHealth
 
@@ -57,3 +58,32 @@ class BaseAIProvider(ABC):
     ) -> str:
         """Generate a complete non-streamed response."""
         pass
+
+
+async def invoke_provider_stream(
+    provider: BaseAIProvider,
+    messages: List[Dict[str, Any]],
+    model: str,
+    temperature: float = 0.7,
+    context_window: int = 8192,
+    max_tokens: Optional[int] = None,
+    keep_alive: Optional[str] = None,
+    request_timeout: Optional[int] = None,
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """Call stream_chat_with_metrics while staying backwards-compatible with custom/mock subclasses."""
+    sig = inspect.signature(provider.stream_chat_with_metrics)
+    kwargs: Dict[str, Any] = {
+        "messages": messages,
+        "model": model,
+        "temperature": temperature,
+        "context_window": context_window,
+    }
+    if "max_tokens" in sig.parameters and max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    if "keep_alive" in sig.parameters and keep_alive is not None:
+        kwargs["keep_alive"] = keep_alive
+    if "request_timeout" in sig.parameters and request_timeout is not None:
+        kwargs["request_timeout"] = request_timeout
+
+    async for event in provider.stream_chat_with_metrics(**kwargs):
+        yield event

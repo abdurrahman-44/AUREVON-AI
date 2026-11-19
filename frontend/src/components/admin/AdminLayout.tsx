@@ -135,7 +135,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
       <nav className="flex-1 space-y-1 overflow-y-auto px-2.5 py-3">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const isActive = activeRoute === item.route;
+          const isActive =
+            activeRoute === item.route || (item.route === '/admin/ai' && activeRoute.startsWith('/admin/ai'));
           return (
             <button
               key={item.route}

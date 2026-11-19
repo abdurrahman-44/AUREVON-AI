@@ -16,6 +16,8 @@ class ProviderFactory:
             return
         if settings.OPENAI_API_KEY and "openai" not in cls._api_keys:
             cls._api_keys["openai"] = settings.OPENAI_API_KEY
+        if getattr(settings, "GEMINI_API_KEY", None) and "gemini" not in cls._api_keys:
+            cls._api_keys["gemini"] = settings.GEMINI_API_KEY
         if settings.GROQ_API_KEY and "groq" not in cls._api_keys:
             cls._api_keys["groq"] = settings.GROQ_API_KEY
         if settings.DEEPSEEK_API_KEY and "deepseek" not in cls._api_keys:
@@ -36,6 +38,7 @@ class ProviderFactory:
         flags = {
             "ollama": True,
             "openai": bool(cls._api_keys.get("openai")),
+            "gemini": bool(cls._api_keys.get("gemini")),
             "groq": bool(cls._api_keys.get("groq")),
             "deepseek": bool(cls._api_keys.get("deepseek")),
         }
@@ -68,6 +71,12 @@ class ProviderFactory:
                     base_url="https://api.openai.com/v1",
                     api_key=cls._api_keys.get("openai", ""),
                 )
+            elif normalized == "gemini":
+                cls._providers["gemini"] = OpenAICompatibleProvider(
+                    name="gemini",
+                    base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+                    api_key=cls._api_keys.get("gemini", ""),
+                )
             elif normalized == "groq":
                 cls._providers["groq"] = OpenAICompatibleProvider(
                     name="groq",
@@ -93,7 +102,7 @@ class ProviderFactory:
     @classmethod
     def list_all_providers(cls) -> List[BaseAIProvider]:
         cls._ensure_env_keys_loaded()
-        names = ["ollama", "groq", "openai", "deepseek"]
+        names = ["ollama", "groq", "openai", "gemini", "deepseek"]
         if settings.PRODUCTION_INFERENCE_URL:
             names.append("production")
         return [cls.get_provider(n) for n in names]

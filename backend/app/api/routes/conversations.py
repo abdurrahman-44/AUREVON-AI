@@ -86,6 +86,9 @@ async def get_conversation(
             content=m.content,
             model=m.model,
             token_usage=m.token_usage,
+            tool_calls=m.tool_calls,
+            citations=m.citations,
+            intent=m.intent,
             created_at=m.created_at,
         )
         for m in conv.messages
@@ -123,6 +126,9 @@ async def get_conversation_messages(
             content=m.content,
             model=m.model,
             token_usage=m.token_usage,
+            tool_calls=m.tool_calls,
+            citations=m.citations,
+            intent=m.intent,
             created_at=m.created_at,
         )
         for m in messages

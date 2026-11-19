@@ -712,10 +712,11 @@ async def test_non_destructive_v2_migration_and_alembic_cli(tmp_path):
     tables = {r[0] for r in fresh_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     version = fresh_conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     fresh_conn.close()
-    assert version == "20261111_0002"
+    assert version == "20261112_0003"
     assert {
         "users",
         "conversations",
+        "conversation_summaries",
         "messages",
         "ai_request_logs",
         "system_ai_configs",
@@ -725,4 +726,7 @@ async def test_non_destructive_v2_migration_and_alembic_cli(tmp_path):
         "security_events",
         "api_request_logs",
         "platform_configs",
+        "tool_configs",
+        "tool_execution_logs",
+        "provider_usage_logs",
     } <= tables

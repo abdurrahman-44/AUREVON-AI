@@ -39,9 +39,15 @@ It supports two first-class deployment modes without changing application code:
 - **Versioned Master System Prompts**: Manage, create, and roll back `SystemPromptVersion` instructions cleanly from `/admin` without code redeploys.
 - **Grounded Pipelines & Graceful Failover**: Optional memory injection, document RAG retrieval, agent tool execution guards (`enable_agent_tools`), primary->fallback provider failover, and honest offline web research notifications.
 
-### 4. Refined Dual-Theme Workspace UI
-- **Minimalist Design System**: Neutral stone Light theme and low-glare obsidian Dark theme powered by CSS custom property tokens, responsive layout (`100dvh`), readable typography, collapsible navigation, markdown/code rendering, and dedicated `/admin` Owner Console.
-- **End-to-End Subsystems**: SSE chat streaming, image vision capability checks, semantic document upload/RAG, long-term memory editor, sandboxed AST calculator/analyzer agents, and DuckDuckGo research citations.
+### 4. Intelligence Engine & Tool Ecosystem
+- **16-Intent Deterministic Router**: Classifies greetings, math, coding, documents, web research, data analysis, memory, tools, platform help, live weather, news, currency conversion, and exact age/date calculations cleanly (`backend/app/services/ai/router.py`), giving greetings a sub-500ms fast-path.
+- **Centralized Local-First Model Manager**: Live Ollama `/api/tags` + `/api/ps` discovery, cold-load serialization (`_model_load_lock`), `keep_alive=900s`, specialist routing, Google Gemini API adapter, and cloud consent/daily-limit guardrails (cloud disabled by default).
+- **9 Policy-Governed Sandboxed Tools**: AST `calculator` + unit converter, deterministic calendar-accurate `date_time` (exact age, working days, leap years), zero-key `weather` (Open-Meteo), `currency_converter` (Frankfurter & Open Exchange Rates), `news_search` (DuckDuckGo news intelligence), isolated `python_data_analysis` (`python -I -B` + XSS-safe SVG `plot_bar`/`plot_line`), tenant-isolated `document_reader` (including `.xlsx`, `.docx`, `.pdf`, `.csv`, code), `knowledge_retrieval` (SQLite FTS5 + vector hybrid RAG with prompt-injection redaction), and policy-gated `web_search`.
+- **Full Documentation**: See [`docs/INTELLIGENCE_ENGINE.md`](docs/INTELLIGENCE_ENGINE.md) for Ollama model setup, Windows CMD commands, tool controls, cloud governance, and troubleshooting.
+
+### 5. Refined Dual-Theme Workspace UI
+- **Minimalist Design System**: Neutral stone Light theme and low-glare obsidian Dark theme powered by CSS custom property tokens, responsive layout (`100dvh`), readable typography, collapsible navigation, markdown/code copy controls, inline SVG chart & citation cards, and regenerate/stop support.
+- **End-to-End Subsystems**: SSE chat streaming, image vision capability checks, semantic document upload/RAG (with SHA-256 deduplication), rolling conversation summaries, explicit long-term memory consent, and autonomous tool execution.
 
 ---
 
@@ -87,8 +93,8 @@ Once an owner exists, public/web owner bootstrap is permanently locked (`403`). 
 
 The private owner-only **AUREVON Control Centre** provides dark-first operational control across 8 dedicated routes:
 - `/admin` — Real-time KPIs (`24h`, `7d`, `30d`, `90d`, `custom`), throughput, latency percentiles (`avg`, `median`, `p95`, `TTFT`), token consumption, and model utilization.
-- `/admin/terminal` — Audited, allowlist-enforced operations terminal (`status`, `system diagnostics`, `db stats`, `ai test`, `users count`, `logs recent`, `cache clear` with interactive confirmation) — zero arbitrary OS shell or SQL execution.
-- `/admin/ai` — Live AI connectivity probe (`POST /api/admin/ai/test`), centralized provider/model pinning, context/temperature defaults, runtime API keys, and versioned master system prompts.
+- `/admin/ai` & `/admin/ai/{models,tools,performance,knowledge,providers}` — Live AI connectivity probe (`POST /api/admin/ai/test`), discovered Ollama RAM/tags catalog, tool enablement & permission policies, 24h/7d/30d TTFT & P95 telemetry, FTS5 knowledge index rebuilds, optional cloud consent/cost tracking, and versioned master system prompts.
+- `/admin/terminal` — Audited, allowlist-enforced operations terminal (`status`, `system diagnostics`, `db stats`, `ai status`, `ai model`, `ai models`, `ai test`, `ai latency`, `ai memory`, `ai tools`, `ai knowledge status`, `ai diagnostics`, `users count`, `logs recent`, `cache clear`) — zero arbitrary OS shell or SQL execution.
 - `/admin/users` — Searchable account directory, status suspension/reactivation, role governance, and privacy-safe metadata drawer (never exposes passwords, tokens, or chat contents).
 - `/admin/system` — Host/container CPU, RAM, process RSS, disk storage, uptime, TTL cache inspector, and live diagnostics suite.
 - `/admin/logs` — Paginated HTTP request telemetry, owner audit trail, error feeds, and retention pruning (`POST /api/admin/logs/prune`).

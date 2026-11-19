@@ -1,10 +1,11 @@
+import hashlib
 import os
+import re
 import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from backend.app.database.session import get_db
 from backend.app.api.deps import get_optional_user, assert_resource_ownership
@@ -24,8 +25,14 @@ from backend.app.core.rate_limit import rate_limit_dependency
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".csv", ".json", ".py", ".js", ".ts"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".txt", ".md", ".csv", ".json", ".py", ".js", ".ts", ".log"}
 MAX_FILE_BYTES = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+
+def _safe_filename(raw_name: str) -> str:
+    base = os.path.basename(raw_name or "uploaded_file")
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", base).lstrip(".")
+    return cleaned[:180] or "uploaded_file"
 
 
 @router.post(
@@ -39,8 +46,7 @@ async def upload_document(
     current_user: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    raw_name = file.filename or "uploaded_file"
-    filename = os.path.basename(raw_name).replace("..", "") or "uploaded_file"
+    filename = _safe_filename(file.filename or "uploaded_file")
     ext = os.path.splitext(filename)[1].lower()
 
     if ext not in ALLOWED_EXTENSIONS:
@@ -52,22 +58,52 @@ async def upload_document(
     content = await file.read()
     file_size = len(content)
 
+    if file_size == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
     if file_size > MAX_FILE_BYTES:
         raise HTTPException(
             status_code=400,
             detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_SIZE_MB} MB",
         )
 
-    # Ensure upload directory exists and avoid filename collisions / traversal
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    unique_name = f"{uuid.uuid4().hex}_{filename}"
-    storage_path = os.path.join(settings.UPLOAD_DIR, unique_name)
+    user_id = current_user.id if current_user else None
+    content_hash = hashlib.sha256(content).hexdigest()
 
-    # Save to disk
+    # Duplicate upload detection scoped strictly to the same user/guest tenant
+    dup_stmt = select(Document).where(
+        Document.content_hash == content_hash,
+        Document.processing_status == "completed",
+    )
+    if user_id is not None:
+        dup_stmt = dup_stmt.where(Document.user_id == user_id)
+    else:
+        dup_stmt = dup_stmt.where(Document.user_id.is_(None))
+    existing_doc = (await db.execute(dup_stmt)).scalar_one_or_none()
+    if existing_doc:
+        return DocumentResponse(
+            id=existing_doc.id,
+            user_id=existing_doc.user_id,
+            filename=existing_doc.filename,
+            file_type=existing_doc.file_type,
+            file_size_bytes=existing_doc.file_size_bytes,
+            content_hash=existing_doc.content_hash,
+            processing_status=existing_doc.processing_status,
+            chunk_count=existing_doc.chunk_count,
+            deduplicated=True,
+            created_at=existing_doc.created_at,
+        )
+
+    # Ensure upload directory exists and verify containment inside UPLOAD_DIR
+    upload_root = os.path.abspath(settings.UPLOAD_DIR)
+    os.makedirs(upload_root, exist_ok=True)
+    unique_name = f"{uuid.uuid4().hex}_{filename}"
+    storage_path = os.path.abspath(os.path.join(upload_root, unique_name))
+    if not storage_path.startswith(upload_root + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid upload path")
+
     with open(storage_path, "wb") as f:
         f.write(content)
-
-    user_id = current_user.id if current_user else None
 
     # Create document record
     doc = Document(
@@ -75,20 +111,20 @@ async def upload_document(
         filename=filename,
         file_type=ext.replace(".", ""),
         file_size_bytes=file_size,
+        content_hash=content_hash,
         storage_path=storage_path,
         processing_status="processing",
     )
     db.add(doc)
     await db.flush()
 
-    # Extract text
+    # Extract text & index chunks
     try:
         pages = DocumentExtractor.extract(content, filename)
         chunker = TextChunker(chunk_size=500, chunk_overlap=80)
         chunks_data = chunker.chunk_document(pages)
 
-        # Generate embeddings & save chunks
-        chunk_count = 0
+        created_chunks: List[DocumentChunk] = []
         for item in chunks_data:
             emb = await EmbeddingService.get_embedding(item["content"])
             chunk = DocumentChunk(
@@ -99,9 +135,12 @@ async def upload_document(
                 embedding=emb,
             )
             db.add(chunk)
-            chunk_count += 1
+            created_chunks.append(chunk)
 
-        doc.chunk_count = chunk_count
+        await db.flush()
+        await RAGService.sync_chunks_to_fts(db, created_chunks)
+
+        doc.chunk_count = len(created_chunks)
         doc.processing_status = "completed"
         await db.commit()
         await db.refresh(doc)
@@ -162,6 +201,7 @@ async def delete_document(
         except Exception:
             pass
 
+    await RAGService.remove_document_from_fts(db, document_id)
     await db.delete(doc)
     await db.commit()
     return None

@@ -15,6 +15,7 @@ from backend.app.models.entities import (
     APIRequestLog,
     AdminAuditLog,
     Conversation,
+    ConversationSummary,
     Document,
     DocumentChunk,
     Memory,
@@ -27,7 +28,12 @@ from backend.app.models.entities import (
 from backend.app.schemas.admin import TerminalCommandInfo, TerminalExecuteResponse
 from backend.app.services.analytics import compute_admin_analytics
 from backend.app.services.audit import record_admin_audit
+from backend.app.services.ai.model_manager import ModelManager
 from backend.app.services.intelligence import IntelligenceCoreService
+from backend.app.services.tools.registry import ToolRegistry
+from backend.app.services.live.currency import CurrencyService
+from backend.app.services.live.news import NewsService
+from backend.app.services.live.weather import WeatherService
 from backend.app.services.system_monitor import (
     PROCESS_STARTED_AT,
     collect_system_monitoring,
@@ -195,6 +201,66 @@ class TerminalCommandRegistry:
             usage="ai test",
         ),
         TerminalCommandInfo(
+            command="ai model",
+            category="AI",
+            description="Show active default model, coding specialist, fallback, and live loaded RAM state.",
+            usage="ai model",
+        ),
+        TerminalCommandInfo(
+            command="ai latency",
+            category="AI",
+            description="Show 24h and 7d AI average latency, TTFT, and success rates.",
+            usage="ai latency",
+        ),
+        TerminalCommandInfo(
+            command="ai memory",
+            category="AI",
+            description="Inspect loaded Ollama RAM/VRAM models, user memories, and rolling summaries.",
+            usage="ai memory",
+        ),
+        TerminalCommandInfo(
+            command="ai tools",
+            category="AI",
+            description="List registered AI tools with status, permission level, and call metrics.",
+            usage="ai tools",
+        ),
+        TerminalCommandInfo(
+            command="ai tools list",
+            category="AI",
+            description="Detailed listing of all registered tools and telemetry counters.",
+            usage="ai tools list",
+        ),
+        TerminalCommandInfo(
+            command="ai knowledge status",
+            category="AI",
+            description="Check uploaded knowledge documents, chunk totals, and SQLite FTS5 index status.",
+            usage="ai knowledge status",
+        ),
+        TerminalCommandInfo(
+            command="ai diagnostics",
+            category="AI",
+            description="Run comprehensive Intelligence Engine readiness and health diagnostics.",
+            usage="ai diagnostics",
+        ),
+        TerminalCommandInfo(
+            command="ai weather",
+            category="AI",
+            description="Test live weather service and forecast retrieval (Open-Meteo).",
+            usage="ai weather [location]",
+        ),
+        TerminalCommandInfo(
+            command="ai news",
+            category="AI",
+            description="Test live news search and headlines retrieval.",
+            usage="ai news [topic]",
+        ),
+        TerminalCommandInfo(
+            command="ai currency",
+            category="AI",
+            description="Test live currency exchange rate service (USD to LKR).",
+            usage="ai currency [from] [to]",
+        ),
+        TerminalCommandInfo(
             command="users count",
             category="Users",
             description="Summarize user accounts by status, role, and 2FA enrollment.",
@@ -261,7 +327,16 @@ class TerminalCommandRegistry:
         if not tokens:
             return None, [], "Empty command. Type 'help' to list allowed commands."
 
-        # Match two-word commands first, then single-word commands
+        # Match three-word commands, then two-word commands, then single-word commands
+        if len(tokens) >= 3:
+            three = f"{tokens[0]} {tokens[1]} {tokens[2]}"
+            three_word_commands = {
+                "ai tools list",
+                "ai knowledge status",
+            }
+            if three in three_word_commands:
+                return three, tokens[3:], None
+
         if len(tokens) >= 2:
             two = f"{tokens[0]} {tokens[1]}"
             two_word_commands = {
@@ -276,6 +351,14 @@ class TerminalCommandRegistry:
                 "ai status",
                 "ai models",
                 "ai test",
+                "ai model",
+                "ai latency",
+                "ai memory",
+                "ai tools",
+                "ai diagnostics",
+                "ai weather",
+                "ai news",
+                "ai currency",
                 "users count",
                 "analytics summary",
                 "logs recent",
@@ -348,7 +431,7 @@ async def execute_terminal_command(
         )
 
     # Reject unexpected extra args on zero-arg commands
-    if canonical not in {"logs recent", "audit recent"} and args:
+    if canonical not in {"logs recent", "audit recent", "ai weather", "ai news", "ai currency"} and args:
         msg = f"Command '{canonical}' does not accept arguments (received: {' '.join(args)})."
         duration_ms = max(1, int((time.perf_counter() - started) * 1000))
         await record_admin_audit(
@@ -585,6 +668,166 @@ async def execute_terminal_command(
                 f"Error: {redact_secrets(res.error_message or 'Unknown error')}"
             )
             return out, res.model_dump(mode="json"), 1, "error"
+
+        if canonical == "ai model":
+            intel = await IntelligenceCoreService.ensure_initialized(db)
+            ollama_state = await ModelManager.fetch_ollama_runtime_state(force_refresh=True)
+            loaded = [m["name"] for m in ollama_state.get("loaded_models", [])]
+            data = {
+                "active_provider": intel.active_provider,
+                "active_model": intel.active_model,
+                "coding_model": intel.coding_model,
+                "fallback_provider": intel.fallback_provider,
+                "fallback_model": intel.fallback_model,
+                "context_window": intel.context_window,
+                "max_output_tokens": intel.max_output_tokens,
+                "keep_alive_seconds": intel.keep_alive_seconds,
+                "loaded_in_ram": loaded,
+            }
+            lines = [
+                f"Active Model       : {intel.active_provider} / {intel.active_model}",
+                f"Coding Specialist  : {intel.coding_model or 'auto/default'}",
+                f"Fallback Target    : {(intel.fallback_provider + '/' + intel.fallback_model) if intel.fallback_model else 'none'}",
+                f"Context / Output   : {intel.context_window} ctx / {intel.max_output_tokens} max_tokens",
+                f"Keep-Alive         : {intel.keep_alive_seconds}s",
+                f"Loaded In RAM      : {', '.join(loaded) if loaded else 'none'}",
+            ]
+            return "\n".join(lines), data, 0, "ok"
+
+        if canonical == "ai latency":
+            a24 = await compute_admin_analytics(db, range_key="24h")
+            a7d = await compute_admin_analytics(db, range_key="7d")
+            data = {
+                "24h_avg_ms": a24.performance.avg_latency_ms,
+                "24h_p95_ms": a24.performance.p95_latency_ms,
+                "24h_ttft_ms": a24.performance.avg_first_token_ms,
+                "7d_avg_ms": a7d.performance.avg_latency_ms,
+                "7d_p95_ms": a7d.performance.p95_latency_ms,
+                "7d_success_rate_pct": a7d.overview.success_rate_pct,
+            }
+            lines = [
+                f"24h Avg / P95 Latency : {a24.performance.avg_latency_ms or 'N/A'} ms / {a24.performance.p95_latency_ms or 'N/A'} ms",
+                f"24h Avg TTFT          : {a24.performance.avg_first_token_ms or 'N/A'} ms",
+                f"7d Avg / P95 Latency  : {a7d.performance.avg_latency_ms or 'N/A'} ms / {a7d.performance.p95_latency_ms or 'N/A'} ms",
+                f"7d Success Rate       : {a7d.overview.success_rate_pct or 'N/A'}%",
+            ]
+            return "\n".join(lines), data, 0, "ok"
+
+        if canonical == "ai memory":
+            ollama_state = await ModelManager.fetch_ollama_runtime_state(force_refresh=True)
+            loaded = ollama_state.get("loaded_models", [])
+            mem_count = int((await db.execute(select(func.count(Memory.id)))).scalar() or 0)
+            sum_count = int((await db.execute(select(func.count(ConversationSummary.id)))).scalar() or 0)
+            data = {
+                "loaded_models": loaded,
+                "user_memories_count": mem_count,
+                "conversation_summaries_count": sum_count,
+            }
+            lines = [
+                f"User Long-Term Memories : {mem_count}",
+                f"Conversation Summaries  : {sum_count}",
+                f"Loaded Models In RAM    : {len(loaded)}",
+            ]
+            for lm in loaded:
+                lines.append(f"  - {lm['name']} ({lm.get('size_mb', 0)} MB total, {lm.get('vram_mb', 0)} MB VRAM)")
+            return "\n".join(lines), data, 0, "ok"
+
+        if canonical in {"ai tools", "ai tools list"}:
+            tools = await ToolRegistry.list_tools_with_stats(db)
+            lines = [f"Registered AI Tools ({len(tools)}):"]
+            for t in tools:
+                state = "ENABLED" if t["is_enabled"] else "DISABLED"
+                lines.append(
+                    f"  - {t['tool_name']:22s} [{state}] perm={t['permission_level']:10s} timeout={t['timeout_seconds']}s calls={t['total_calls']}"
+                )
+            return "\n".join(lines), {"tools": tools}, 0, "ok"
+
+        if canonical == "ai knowledge status":
+            doc_cnt = int((await db.execute(select(func.count(Document.id)))).scalar() or 0)
+            chunk_cnt = int((await db.execute(select(func.count(DocumentChunk.id)))).scalar() or 0)
+            fts_cnt: Optional[int] = None
+            try:
+                from sqlalchemy import text as _sqlt
+                fts_cnt = int((await db.execute(_sqlt("SELECT COUNT(*) FROM document_chunks_fts"))).scalar() or 0)
+            except Exception:
+                fts_cnt = None
+            data = {
+                "documents": doc_cnt,
+                "chunks": chunk_cnt,
+                "fts5_indexed_chunks": fts_cnt,
+                "fts5_active": fts_cnt is not None,
+            }
+            lines = [
+                f"Indexed Documents : {doc_cnt}",
+                f"Document Chunks   : {chunk_cnt}",
+                f"SQLite FTS5 Index : {fts_cnt if fts_cnt is not None else 'Unavailable'}",
+            ]
+            return "\n".join(lines), data, 0, "ok"
+
+        if canonical == "ai diagnostics":
+            intel = await IntelligenceCoreService.ensure_initialized(db)
+            ollama_state = await ModelManager.fetch_ollama_runtime_state(force_refresh=True)
+            tools = await ToolRegistry.list_tools_with_stats(db)
+            enabled_tools = [t["tool_name"] for t in tools if t["is_enabled"]]
+            doc_cnt = int((await db.execute(select(func.count(Document.id)))).scalar() or 0)
+            data = {
+                "ollama_reachable": bool(ollama_state.get("reachable")),
+                "installed_models": [m.get("name") or m.get("id") for m in ollama_state.get("installed_models", [])],
+                "active_model": f"{intel.active_provider}/{intel.active_model}",
+                "enabled_tools": enabled_tools,
+                "documents_indexed": doc_cnt,
+                "cloud_enabled": bool(intel.cloud_inference_enabled),
+                "require_cloud_consent": bool(intel.require_cloud_consent),
+            }
+            lines = [
+                f"Ollama Runtime   : {'ONLINE' if data['ollama_reachable'] else 'OFFLINE'} ({ollama_state.get('base_url')})",
+                f"Installed Models : {', '.join(data['installed_models']) or 'none'}",
+                f"Default Model    : {data['active_model']}",
+                f"Enabled Tools    : {', '.join(enabled_tools) or 'none'}",
+                f"Documents        : {doc_cnt}",
+                f"Cloud Policy     : enabled={data['cloud_enabled']}, require_consent={data['require_cloud_consent']}",
+            ]
+            return "\n".join(lines), data, 0, "ok"
+
+        if canonical == "ai weather":
+            loc = " ".join(args).strip() if args else "Colombo"
+            w_res = await WeatherService.get_weather(loc)
+            if not w_res.get("ok"):
+                return f"Weather lookup failed: {w_res.get('error')}", w_res, 1, "error"
+            curr = w_res.get("current") or {}
+            out_lines = [
+                f"Live Weather for {w_res.get('location')}:",
+                f"Condition   : {curr.get('condition')}",
+                f"Temperature : {curr.get('temperature_c')}°C (Feels like {curr.get('feels_like_c')}°C)",
+                f"Humidity    : {curr.get('humidity_pct')}%",
+                f"Wind Speed  : {curr.get('wind_speed_kmh')} km/h",
+                f"Source      : {w_res.get('source')}",
+            ]
+            if w_res.get("tomorrow"):
+                tm = w_res["tomorrow"]
+                out_lines.append(f"Tomorrow    : {tm.get('condition')}, High: {tm.get('temp_max_c')}°C, Rain Prob: {tm.get('rain_probability_pct')}%")
+            return "\n".join(out_lines), w_res, 0, "ok"
+
+        if canonical == "ai news":
+            topic = " ".join(args).strip() if args else "ai"
+            n_res = await NewsService.get_news(topic)
+            if not n_res.get("ok"):
+                return f"News lookup failed: {n_res.get('error')}", n_res, 1, "error"
+            articles = n_res.get("articles") or []
+            out_lines = [f"Recent News for '{topic}' ({len(articles)} articles found):"]
+            for a in articles:
+                out_lines.append(f"  • {a.get('title')} [{a.get('source')}]")
+                out_lines.append(f"    {a.get('url')}")
+            return "\n".join(out_lines), n_res, 0, "ok"
+
+        if canonical == "ai currency":
+            base = args[0].upper() if len(args) > 0 else "USD"
+            target = args[1].upper() if len(args) > 1 else "LKR"
+            c_res = await CurrencyService.get_exchange_rate(base, target, 1.0)
+            if not c_res.get("ok"):
+                return f"Currency lookup failed: {c_res.get('error')}", c_res, 1, "error"
+            out = f"Live Forex: 1 {base} = {c_res.get('rate')} {target} (Source: {c_res.get('source')}, Date: {c_res.get('date')})"
+            return out, c_res, 0, "ok"
 
         if canonical == "users count":
             total = int((await db.execute(select(func.count(User.id)))).scalar_one() or 0)

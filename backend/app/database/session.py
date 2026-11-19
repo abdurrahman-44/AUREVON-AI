@@ -59,25 +59,76 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def _sqlite_add_column_if_missing(
+    conn: AsyncConnection,
+    table: str,
+    column: str,
+    ddl: str,
+) -> None:
+    res = await conn.execute(text(f"PRAGMA table_info({table})"))
+    existing_cols = {row[1] for row in res.fetchall()}
+    if column not in existing_cols:
+        await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+
+async def _ensure_sqlite_fts5(conn: AsyncConnection) -> None:
+    """Create and backfill SQLite FTS5 index for document chunks if FTS5 is compiled in."""
+    try:
+        await conn.execute(
+            text(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts "
+                "USING fts5(chunk_id UNINDEXED, document_id UNINDEXED, content, tokenize='porter unicode61')"
+            )
+        )
+        # Backfill any chunks missing from the FTS index (idempotent & incremental)
+        await conn.execute(
+            text(
+                "INSERT INTO document_chunks_fts(chunk_id, document_id, content) "
+                "SELECT dc.id, dc.document_id, dc.content FROM document_chunks dc "
+                "WHERE NOT EXISTS (SELECT 1 FROM document_chunks_fts f WHERE f.chunk_id = dc.id)"
+            )
+        )
+    except Exception as exc:
+        logger.warning(f"SQLite FTS5 initialization skipped (fallback keyword scoring active): {exc}")
+
+
 async def _apply_v2_column_upgrades(conn: AsyncConnection) -> None:
-    """Safely upgrade existing v1 tables in-place without losing user rows."""
+    """Safely upgrade existing v1/v2 tables in-place without losing user rows."""
     dialect = conn.dialect.name
     if dialect == "sqlite":
-        res = await conn.execute(text("PRAGMA table_info(users)"))
-        existing_cols = {row[1] for row in res.fetchall()}
-        if "role" not in existing_cols:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'user'"))
-        if "is_active" not in existing_cols:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
-        if "last_active_at" not in existing_cols:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN last_active_at DATETIME"))
-        if "totp_secret" not in existing_cols:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64)"))
-        if "totp_enabled" not in existing_cols:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT 0"))
+        await _sqlite_add_column_if_missing(conn, "users", "role", "VARCHAR(32) NOT NULL DEFAULT 'user'")
+        await _sqlite_add_column_if_missing(conn, "users", "is_active", "BOOLEAN NOT NULL DEFAULT 1")
+        await _sqlite_add_column_if_missing(conn, "users", "last_active_at", "DATETIME")
+        await _sqlite_add_column_if_missing(conn, "users", "totp_secret", "VARCHAR(64)")
+        await _sqlite_add_column_if_missing(conn, "users", "totp_enabled", "BOOLEAN NOT NULL DEFAULT 0")
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_role ON users (role)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_active ON users (is_active)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_last_active_at ON users (last_active_at)"))
+
+        # Intelligence Engine additive columns
+        await _sqlite_add_column_if_missing(conn, "messages", "tool_calls", "JSON")
+        await _sqlite_add_column_if_missing(conn, "messages", "citations", "JSON")
+        await _sqlite_add_column_if_missing(conn, "messages", "intent", "VARCHAR(64)")
+
+        await _sqlite_add_column_if_missing(conn, "documents", "content_hash", "VARCHAR(64)")
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_content_hash ON documents (content_hash)"))
+
+        await _sqlite_add_column_if_missing(conn, "ai_request_logs", "intent", "VARCHAR(64)")
+        await _sqlite_add_column_if_missing(conn, "ai_request_logs", "tools_used", "JSON")
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ai_request_logs_intent ON ai_request_logs (intent)"))
+
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "coding_provider", "VARCHAR(64)")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "coding_model", "VARCHAR(128)")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "max_output_tokens", "INTEGER NOT NULL DEFAULT 2048")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "keep_alive_seconds", "INTEGER NOT NULL DEFAULT 900")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "request_timeout_seconds", "INTEGER NOT NULL DEFAULT 120")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "streaming_enabled", "BOOLEAN NOT NULL DEFAULT 1")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "web_search_enabled", "BOOLEAN NOT NULL DEFAULT 0")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "cloud_inference_enabled", "BOOLEAN NOT NULL DEFAULT 0")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "require_cloud_consent", "BOOLEAN NOT NULL DEFAULT 1")
+        await _sqlite_add_column_if_missing(conn, "system_ai_configs", "cloud_daily_limit", "INTEGER NOT NULL DEFAULT 100")
+
+        await _ensure_sqlite_fts5(conn)
     elif dialect == "postgresql":
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) NOT NULL DEFAULT 'user'"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"))
@@ -87,6 +138,28 @@ async def _apply_v2_column_upgrades(conn: AsyncConnection) -> None:
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_role ON users (role)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_active ON users (is_active)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_last_active_at ON users (last_active_at)"))
+
+        await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_calls JSONB"))
+        await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS citations JSONB"))
+        await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS intent VARCHAR(64)"))
+
+        await conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_content_hash ON documents (content_hash)"))
+
+        await conn.execute(text("ALTER TABLE ai_request_logs ADD COLUMN IF NOT EXISTS intent VARCHAR(64)"))
+        await conn.execute(text("ALTER TABLE ai_request_logs ADD COLUMN IF NOT EXISTS tools_used JSONB"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ai_request_logs_intent ON ai_request_logs (intent)"))
+
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS coding_provider VARCHAR(64)"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS coding_model VARCHAR(128)"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS max_output_tokens INTEGER NOT NULL DEFAULT 2048"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS keep_alive_seconds INTEGER NOT NULL DEFAULT 900"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS request_timeout_seconds INTEGER NOT NULL DEFAULT 120"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS streaming_enabled BOOLEAN NOT NULL DEFAULT TRUE"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS cloud_inference_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS require_cloud_consent BOOLEAN NOT NULL DEFAULT TRUE"))
+        await conn.execute(text("ALTER TABLE system_ai_configs ADD COLUMN IF NOT EXISTS cloud_daily_limit INTEGER NOT NULL DEFAULT 100"))
 
 
 async def init_db() -> None:

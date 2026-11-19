@@ -1,8 +1,9 @@
 import math
-from datetime import datetime, timezone
-from typing import List, Optional
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.deps import require_admin
@@ -17,8 +18,10 @@ from backend.app.models.entities import (
     AdminAuditLog,
     Conversation,
     Document,
+    DocumentChunk,
     Memory,
     Message,
+    ProviderUsageLog,
     SecurityEvent,
     User,
 )
@@ -34,6 +37,7 @@ from backend.app.schemas.admin import (
     ErrorLogsResponse,
     LogPruneRequest,
     LogPruneResponse,
+    ModelSelectRequest,
     PaginatedAPIRequestLogsResponse,
     PaginatedAdminAuditLogsResponse,
     PaginatedSecurityEventsResponse,
@@ -50,6 +54,7 @@ from backend.app.schemas.admin import (
     TerminalCommandInfo,
     TerminalExecuteRequest,
     TerminalExecuteResponse,
+    ToolConfigUpdateRequest,
     TwoFactorSetupResponse,
     TwoFactorStatusResponse,
     TwoFactorVerifyRequest,
@@ -57,7 +62,11 @@ from backend.app.schemas.admin import (
     UserStatusUpdateRequest,
 )
 from backend.app.services.admin_terminal import TerminalCommandRegistry, execute_terminal_command
+from backend.app.services.ai.factory import ProviderFactory
+from backend.app.services.ai.model_manager import ModelManager
 from backend.app.services.analytics import compute_admin_analytics
+from backend.app.services.documents.rag import RAGService
+from backend.app.services.tools.registry import ToolRegistry
 from backend.app.services.audit import (
     extract_client_ip,
     purge_expired_logs,
@@ -903,3 +912,283 @@ async def update_platform_settings(
         enable_api_request_logging=cfg.enable_api_request_logging,
         updated_at=cfg.updated_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Control Centre Intelligence Engine Management (Models, Tools, Knowledge, Providers, Perf)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ai/models")
+async def get_admin_ai_models(db: AsyncSession = Depends(get_db)):
+    """Discover installed local Ollama models, loaded RAM/VRAM status, and cloud provider readiness."""
+    cfg = await IntelligenceCoreService.ensure_initialized(db)
+    return await ModelManager.list_discovered_models(cfg)
+
+
+@router.post("/ai/models/select", response_model=SystemAIConfigResponse)
+async def select_admin_ai_model(
+    payload: ModelSelectRequest,
+    request: Request,
+    admin_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Safely switch active default, coding specialist, or fallback models with availability validation."""
+    p_name = payload.active_provider.strip().lower()
+    m_name = payload.active_model.strip()
+
+    if p_name == "ollama":
+        state = await ModelManager.fetch_ollama_runtime_state(force_refresh=True)
+        if state["reachable"] and state["installed_names"] and m_name not in state["installed_names"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{m_name}' is not installed in local Ollama. Installed: {', '.join(sorted(state['installed_names']))}",
+            )
+
+    update_req = SystemAIConfigUpdateRequest(
+        active_provider=p_name,
+        active_model=m_name,
+        coding_provider=payload.coding_provider,
+        coding_model=payload.coding_model,
+        fallback_provider=payload.fallback_provider,
+        fallback_model=payload.fallback_model,
+        context_window=payload.context_window,
+        max_output_tokens=payload.max_output_tokens,
+        keep_alive_seconds=payload.keep_alive_seconds,
+        request_timeout_seconds=payload.request_timeout_seconds,
+        streaming_enabled=payload.streaming_enabled,
+    )
+    updated = await IntelligenceCoreService.update_config(db, update_req, admin_user)
+    await record_admin_audit(
+        db,
+        actor_user_id=admin_user.id,
+        actor_username=admin_user.username,
+        action="ai.models.select",
+        target_type="ai_config",
+        summary=f"Selected active model {p_name}/{m_name}",
+        details=payload.model_dump(exclude_none=True),
+        ip_address=extract_client_ip(request),
+    )
+    return updated
+
+
+@router.get("/ai/tools")
+async def get_admin_ai_tools(db: AsyncSession = Depends(get_db)):
+    """List registered AI tools, permission levels, timeouts, and execution telemetry."""
+    tools = await ToolRegistry.list_tools_with_stats(db)
+    return {"tools": tools}
+
+
+@router.patch("/ai/tools/{tool_name}")
+async def update_admin_ai_tool(
+    tool_name: str,
+    payload: ToolConfigUpdateRequest,
+    request: Request,
+    admin_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable/disable a tool or adjust its permission tier, timeout, or call cap."""
+    cfg = await ToolRegistry.update_tool(
+        db,
+        tool_name,
+        is_enabled=payload.is_enabled,
+        permission_level=payload.permission_level,
+        timeout_seconds=payload.timeout_seconds,
+        max_calls_per_request=payload.max_calls_per_request,
+        admin_user=admin_user,
+    )
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+
+    await record_admin_audit(
+        db,
+        actor_user_id=admin_user.id,
+        actor_username=admin_user.username,
+        action="ai.tools.update",
+        target_type="tool",
+        target_id=tool_name,
+        summary=f"Updated tool '{tool_name}' (enabled={cfg.is_enabled}, perm={cfg.permission_level})",
+        details=payload.model_dump(exclude_none=True),
+        ip_address=extract_client_ip(request),
+    )
+    return {
+        "tool_name": cfg.tool_name,
+        "display_name": cfg.display_name,
+        "is_enabled": cfg.is_enabled,
+        "permission_level": cfg.permission_level,
+        "timeout_seconds": cfg.timeout_seconds,
+        "max_calls_per_request": cfg.max_calls_per_request,
+        "updated_at": cfg.updated_at.isoformat() if cfg.updated_at else None,
+    }
+
+
+@router.get("/ai/knowledge")
+async def get_admin_ai_knowledge(db: AsyncSession = Depends(get_db)):
+    """List privacy-safe indexed document metadata and FTS5 index health."""
+    docs = (await db.execute(select(Document).order_by(Document.created_at.desc()).limit(200))).scalars().all()
+    total_chunks = int((await db.execute(select(func.count(DocumentChunk.id)))).scalar() or 0)
+    fts_rows: Optional[int] = None
+    try:
+        fts_rows = int((await db.execute(text("SELECT COUNT(*) FROM document_chunks_fts"))).scalar() or 0)
+    except Exception:
+        fts_rows = None
+
+    return {
+        "total_documents": len(docs),
+        "total_chunks": total_chunks,
+        "fts_indexed_chunks": fts_rows,
+        "fts_available": fts_rows is not None,
+        "documents": [
+            {
+                "id": d.id,
+                "user_id": d.user_id,
+                "filename": d.filename,
+                "file_type": d.file_type,
+                "file_size_bytes": d.file_size_bytes,
+                "content_hash": d.content_hash,
+                "processing_status": d.processing_status,
+                "chunk_count": d.chunk_count,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in docs
+        ],
+    }
+
+
+@router.post("/ai/knowledge/rebuild")
+async def rebuild_admin_knowledge_index(
+    request: Request,
+    admin_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rebuild the SQLite FTS5 full-text search index across all stored document chunks."""
+    indexed = await RAGService.rebuild_fts_index(db)
+    await record_admin_audit(
+        db,
+        actor_user_id=admin_user.id,
+        actor_username=admin_user.username,
+        action="ai.knowledge.rebuild",
+        target_type="knowledge_index",
+        summary=f"Rebuilt FTS5 knowledge index ({indexed} chunks indexed)",
+        details={"indexed_chunks": indexed},
+        ip_address=extract_client_ip(request),
+    )
+    return {"status": "rebuilt", "indexed_chunks": indexed}
+
+
+@router.delete("/ai/knowledge/{doc_id}")
+async def delete_admin_knowledge_document(
+    doc_id: str,
+    request: Request,
+    admin_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove an indexed document and its FTS entries cleanly as owner."""
+    doc = (await db.execute(select(Document).where(Document.id == doc_id))).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    filename = doc.filename
+    await RAGService.remove_document_from_fts(db, doc_id)
+    if doc.storage_path and os.path.exists(doc.storage_path):
+        try:
+            os.remove(doc.storage_path)
+        except Exception:
+            pass
+    await db.delete(doc)
+    await db.commit()
+
+    await record_admin_audit(
+        db,
+        actor_user_id=admin_user.id,
+        actor_username=admin_user.username,
+        action="ai.knowledge.delete",
+        target_type="document",
+        target_id=doc_id,
+        summary=f"Removed indexed document '{filename}'",
+        ip_address=extract_client_ip(request),
+    )
+    return {"status": "deleted", "id": doc_id, "filename": filename}
+
+
+@router.get("/ai/providers")
+async def get_admin_ai_providers(db: AsyncSession = Depends(get_db)):
+    """Return local & optional cloud provider health, consent policy, and aggregated usage/cost stats."""
+    cfg = await IntelligenceCoreService.ensure_initialized(db)
+    key_flags = ProviderFactory.get_configured_key_flags()
+    ollama_state = await ModelManager.fetch_ollama_runtime_state()
+
+    usage_res = await db.execute(
+        select(
+            ProviderUsageLog.provider,
+            ProviderUsageLog.is_cloud,
+            func.count(ProviderUsageLog.id),
+            func.sum(ProviderUsageLog.total_tokens),
+            func.sum(ProviderUsageLog.estimated_cost_usd),
+        ).group_by(ProviderUsageLog.provider, ProviderUsageLog.is_cloud)
+    )
+    usage_by_provider: List[Dict[str, Any]] = []
+    for p_name, is_cloud, calls, tokens, cost in usage_res.all():
+        usage_by_provider.append(
+            {
+                "provider": p_name,
+                "is_cloud": bool(is_cloud),
+                "requests": int(calls or 0),
+                "total_tokens": int(tokens or 0),
+                "estimated_cost_usd": round(float(cost or 0.0), 6),
+            }
+        )
+
+    return {
+        "cloud_inference_enabled": bool(cfg.cloud_inference_enabled),
+        "require_cloud_consent": bool(cfg.require_cloud_consent),
+        "cloud_daily_limit": int(cfg.cloud_daily_limit or 100),
+        "ollama_reachable": bool(ollama_state.get("reachable")),
+        "provider_keys_configured": key_flags,
+        "usage": usage_by_provider,
+    }
+
+
+@router.get("/ai/performance")
+async def get_admin_ai_performance(
+    range_key: str = Query("7d", pattern="^(24h|7d|30d)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return detailed AI inference latency percentiles, TTFT, intent breakdown, and loaded RAM state."""
+    hours = 24 if range_key == "24h" else (720 if range_key == "30d" else 168)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    logs = (
+        await db.execute(
+            select(AIRequestLog).where(AIRequestLog.created_at >= since).order_by(AIRequestLog.created_at.desc())
+        )
+    ).scalars().all()
+
+    durations = sorted(int(r.duration_ms) for r in logs if r.duration_ms is not None)
+    ttfts = sorted(int(r.first_token_ms) for r in logs if r.first_token_ms is not None)
+    total = len(logs)
+    ok_count = sum(1 for r in logs if r.success)
+
+    def _pct(sorted_vals: List[int], pct: float) -> Optional[int]:
+        if not sorted_vals:
+            return None
+        idx = min(len(sorted_vals) - 1, max(0, int(round((pct / 100.0) * (len(sorted_vals) - 1)))))
+        return sorted_vals[idx]
+
+    intent_counts: Dict[str, int] = {}
+    for r in logs:
+        key = r.intent or r.request_type or "chat"
+        intent_counts[key] = intent_counts.get(key, 0) + 1
+
+    ollama_state = await ModelManager.fetch_ollama_runtime_state()
+    return {
+        "range": range_key,
+        "total_requests": total,
+        "successful_requests": ok_count,
+        "success_rate_pct": round((ok_count / total) * 100.0, 2) if total else None,
+        "avg_latency_ms": round(sum(durations) / len(durations), 1) if durations else None,
+        "median_latency_ms": _pct(durations, 50),
+        "p95_latency_ms": _pct(durations, 95),
+        "avg_ttft_ms": round(sum(ttfts) / len(ttfts), 1) if ttfts else None,
+        "intent_breakdown": [{"intent": k, "count": v} for k, v in sorted(intent_counts.items(), key=lambda kv: -kv[1])],
+        "loaded_models": ollama_state.get("loaded_models", []),
+    }

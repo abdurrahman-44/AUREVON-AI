@@ -6,17 +6,37 @@ import {
   runAdminAITest,
   updateAdminIntelligence,
 } from '../../services/api';
-import { AITestResponse, SystemAIConfigResponse } from '../../types';
+import { AITestResponse, AdminSectionRoute, SystemAIConfigResponse } from '../../types';
+import {
+  AdminAIKnowledgePanel,
+  AdminAIModelsPanel,
+  AdminAIPerformancePanel,
+  AdminAIProvidersPanel,
+  AdminAIToolsPanel,
+} from './AdminAISubViews';
 
 interface AdminAIPageProps {
   intelligence: SystemAIConfigResponse | null;
+  activeRoute?: AdminSectionRoute;
+  onNavigate?: (path: AdminSectionRoute) => void;
   onUpdated: (next: SystemAIConfigResponse) => void;
   onNotice: (msg: string) => void;
   onError: (msg: string) => void;
 }
 
+const AI_TABS: { route: AdminSectionRoute; label: string }[] = [
+  { route: '/admin/ai', label: 'Core & Prompts' },
+  { route: '/admin/ai/models', label: 'Models & Specialists' },
+  { route: '/admin/ai/tools', label: 'Tools & Permissions' },
+  { route: '/admin/ai/performance', label: 'Performance' },
+  { route: '/admin/ai/knowledge', label: 'Knowledge & FTS5' },
+  { route: '/admin/ai/providers', label: 'Providers & Cloud' },
+];
+
 export const AdminAIPage: React.FC<AdminAIPageProps> = ({
   intelligence,
+  activeRoute = '/admin/ai',
+  onNavigate,
   onUpdated,
   onNotice,
   onError,
@@ -160,6 +180,73 @@ export const AdminAIPage: React.FC<AdminAIPageProps> = ({
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-line bg-surface p-1.5">
+        {AI_TABS.map((tab) => {
+          const active = activeRoute === tab.route;
+          return (
+            <button
+              key={tab.route}
+              type="button"
+              onClick={() => onNavigate?.(tab.route)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                active
+                  ? 'bg-accent text-white shadow-sm'
+                  : 'text-ink-secondary hover:bg-elevated hover:text-ink'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeRoute === '/admin/ai/models' && (
+        <AdminAIModelsPanel
+          intelligence={intelligence}
+          onUpdated={onUpdated}
+          onNotice={onNotice}
+          onError={onError}
+        />
+      )}
+
+      {activeRoute === '/admin/ai/tools' && (
+        <AdminAIToolsPanel
+          intelligence={intelligence}
+          onUpdated={onUpdated}
+          onNotice={onNotice}
+          onError={onError}
+        />
+      )}
+
+      {activeRoute === '/admin/ai/performance' && (
+        <AdminAIPerformancePanel
+          intelligence={intelligence}
+          onUpdated={onUpdated}
+          onNotice={onNotice}
+          onError={onError}
+        />
+      )}
+
+      {activeRoute === '/admin/ai/knowledge' && (
+        <AdminAIKnowledgePanel
+          intelligence={intelligence}
+          onUpdated={onUpdated}
+          onNotice={onNotice}
+          onError={onError}
+        />
+      )}
+
+      {activeRoute === '/admin/ai/providers' && (
+        <AdminAIProvidersPanel
+          intelligence={intelligence}
+          onUpdated={onUpdated}
+          onNotice={onNotice}
+          onError={onError}
+        />
+      )}
+
+      {activeRoute === '/admin/ai' && (
+      <>
       <section className="rounded-xl border border-line bg-surface p-5">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-accent" />
@@ -491,6 +578,8 @@ export const AdminAIPage: React.FC<AdminAIPageProps> = ({
           </div>
         </div>
       </section>
+      </>
+      )}
     </div>
   );
 };

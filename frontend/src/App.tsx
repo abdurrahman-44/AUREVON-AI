@@ -24,11 +24,13 @@ import {
   updateConversationTitle,
 } from './services/api';
 import {
+  CitationItem,
   Conversation,
   Message,
   ModelInfo,
   PublicIntelligenceConfig,
   SystemStatus,
+  ToolCallEvent,
   User,
   UserSettings,
 } from './types';
@@ -41,6 +43,10 @@ export const App: React.FC = () => {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingStatus, setStreamingStatus] = useState<string | null>(null);
+  const [streamingTools, setStreamingTools] = useState<ToolCallEvent[]>([]);
+  const [streamingCitations, setStreamingCitations] = useState<CitationItem[]>([]);
+  const [streamingCharts, setStreamingCharts] = useState<string[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('qwen2.5:3b');
   const [publicIntelligence, setPublicIntelligence] = useState<PublicIntelligenceConfig | null>(null);
@@ -250,23 +256,33 @@ export const App: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  const handleSend = async (customPrompt?: string, images?: string[]) => {
+  const handleSend = async (
+    customPrompt?: string,
+    images?: string[],
+    options?: { documentIds?: string[]; webSearch?: boolean; allowCloud?: boolean; regenerate?: boolean }
+  ) => {
     const promptToSend = (customPrompt !== undefined ? customPrompt : input).trim();
     if ((!promptToSend && (!images || images.length === 0)) || isStreaming) return;
 
-    setInput('');
-    const tempUserMessage: Message = {
-      id: `temp-${Date.now()}`,
-      conversation_id: activeConversationId || '',
-      role: 'user',
-      content: promptToSend || '(Attached image)',
-      model: selectedModel,
-      created_at: new Date().toISOString(),
-    };
+    if (!options?.regenerate) {
+      setInput('');
+      const tempUserMessage: Message = {
+        id: `temp-${Date.now()}`,
+        conversation_id: activeConversationId || '',
+        role: 'user',
+        content: promptToSend || '(Attached image)',
+        model: selectedModel,
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, tempUserMessage]);
+    }
 
-    setMessages((prev) => [...prev, tempUserMessage]);
     setIsStreaming(true);
     setStreamingContent('');
+    setStreamingStatus('analyzing');
+    setStreamingTools([]);
+    setStreamingCitations([]);
+    setStreamingCharts([]);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -274,6 +290,10 @@ export const App: React.FC = () => {
     let currentConversationId = activeConversationId;
     let accumulated = '';
     let resolvedModel = selectedModel;
+    let resolvedIntent: string | null = null;
+    let collectedTools: ToolCallEvent[] = [];
+    let collectedCitations: CitationItem[] = [];
+    let collectedCharts: string[] = [];
 
     try {
       await streamChat({
@@ -281,6 +301,10 @@ export const App: React.FC = () => {
         message: promptToSend || 'Explain this image',
         model: selectedModel,
         images,
+        documentIds: options?.documentIds,
+        webSearch: options?.webSearch,
+        allowCloud: options?.allowCloud,
+        regenerate: options?.regenerate,
         abortSignal: controller.signal,
         onInit: (data) => {
           if (!currentConversationId && data.conversation_id) {
@@ -291,6 +315,24 @@ export const App: React.FC = () => {
             resolvedModel = data.model;
             setSelectedModel(data.model);
           }
+          if (data.intent) {
+            resolvedIntent = data.intent;
+          }
+        },
+        onStatus: (st) => {
+          setStreamingStatus(st);
+        },
+        onToolEvent: (ev) => {
+          collectedTools = [...collectedTools, ev];
+          setStreamingTools(collectedTools);
+        },
+        onCitations: (cits) => {
+          collectedCitations = cits;
+          setStreamingCitations(cits);
+        },
+        onCharts: (charts) => {
+          collectedCharts = [...collectedCharts, ...charts];
+          setStreamingCharts(collectedCharts);
         },
         onChunk: (delta) => {
           accumulated += delta;
@@ -305,10 +347,18 @@ export const App: React.FC = () => {
             content: accumulated,
             model: data.model || resolvedModel,
             token_usage: data.token_usage || null,
+            tool_calls: data.tools_used || (collectedTools.length > 0 ? collectedTools : null),
+            citations: data.citations || (collectedCitations.length > 0 ? collectedCitations : null),
+            charts: collectedCharts.length > 0 ? collectedCharts : null,
+            intent: data.intent || resolvedIntent,
             created_at: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, finalAssistantMsg]);
           setStreamingContent('');
+          setStreamingStatus(null);
+          setStreamingTools([]);
+          setStreamingCitations([]);
+          setStreamingCharts([]);
 
           const updatedConvs = await fetchConversations();
           setConversations(updatedConvs);
@@ -316,6 +366,7 @@ export const App: React.FC = () => {
         onError: (err) => {
           setIsStreaming(false);
           setStreamingContent('');
+          setStreamingStatus(null);
           setMessages((prev) => [
             ...prev,
             {
@@ -331,7 +382,22 @@ export const App: React.FC = () => {
     } catch {
       setIsStreaming(false);
       setStreamingContent('');
+      setStreamingStatus(null);
     }
+  };
+
+  const handleRegenerateLast = () => {
+    if (isStreaming || messages.length === 0) return;
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    if (!lastUser) return;
+    // Remove trailing assistant message from UI state cleanly before re-streaming
+    setMessages((prev) => {
+      if (prev.length > 0 && prev[prev.length - 1].role === 'assistant') {
+        return prev.slice(0, -1);
+      }
+      return prev;
+    });
+    handleSend(lastUser.content, undefined, { regenerate: true });
   };
 
   const handleStopGeneration = () => {
@@ -348,6 +414,9 @@ export const App: React.FC = () => {
           role: 'assistant',
           content: streamingContent + ' *(Stopped)*',
           model: selectedModel,
+          tool_calls: streamingTools.length > 0 ? streamingTools : null,
+          citations: streamingCitations.length > 0 ? streamingCitations : null,
+          charts: streamingCharts.length > 0 ? streamingCharts : null,
           created_at: new Date().toISOString(),
         },
       ]);
@@ -409,8 +478,14 @@ export const App: React.FC = () => {
             <WelcomeScreen onSelectPrompt={(p) => handleSend(p)} selectedModel={selectedModel} />
           ) : (
             <div className="max-w-3xl mx-auto py-6">
-              {messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
+              {messages.map((msg, idx) => (
+                <ChatMessage
+                  key={msg.id}
+                  message={msg}
+                  onRegenerate={
+                    msg.role === 'assistant' && idx === messages.length - 1 ? handleRegenerateLast : undefined
+                  }
+                />
               ))}
 
               {isStreaming && (
@@ -421,9 +496,13 @@ export const App: React.FC = () => {
                     role: 'assistant',
                     content: streamingContent || 'Thinking...',
                     model: selectedModel,
+                    tool_calls: streamingTools,
+                    citations: streamingCitations,
+                    charts: streamingCharts,
                     created_at: new Date().toISOString(),
                   }}
                   isStreaming={true}
+                  streamingStatus={streamingStatus}
                 />
               )}
               <div ref={messagesEndRef} />
@@ -435,7 +514,7 @@ export const App: React.FC = () => {
           <Composer
             input={input}
             setInput={setInput}
-            onSend={(text, images) => handleSend(text, images)}
+            onSend={(text, images, opts) => handleSend(text, images, opts)}
             onStop={handleStopGeneration}
             isStreaming={isStreaming}
             selectedModel={selectedModel}
@@ -444,6 +523,7 @@ export const App: React.FC = () => {
             allowModelSwitching={allowSwitching}
             canManageModels={isOwner || allowSwitching}
             onOpenModelManagement={() => setIsModelModalOpen(true)}
+            cloudAvailable={Boolean(publicIntelligence?.cloud_inference_enabled)}
           />
         </div>
       </main>

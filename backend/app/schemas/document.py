@@ -9,8 +9,10 @@ class DocumentResponse(BaseModel):
     filename: str
     file_type: str
     file_size_bytes: int
+    content_hash: Optional[str] = None
     processing_status: str
     chunk_count: int
+    deduplicated: bool = False
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

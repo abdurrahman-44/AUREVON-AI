@@ -14,6 +14,10 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0)
     stream: bool = Field(True, description="Whether to stream response chunks via SSE")
     images: Optional[List[str]] = Field(None, description="Optional base64-encoded images for multimodal vision models")
+    document_ids: Optional[List[str]] = Field(None, description="Optional uploaded document IDs scoped to this turn")
+    web_search: bool = Field(False, description="Optional user request to enable live web lookup for this turn")
+    allow_cloud: bool = Field(False, description="Explicit user consent for cloud inference when enabled on server")
+    regenerate: bool = Field(False, description="Replace the trailing assistant turn cleanly when regenerating")
 
 
 class ChatChunk(BaseModel):

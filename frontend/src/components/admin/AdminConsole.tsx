@@ -44,6 +44,11 @@ const VALID_ADMIN_ROUTES: AdminSectionRoute[] = [
   '/admin',
   '/admin/terminal',
   '/admin/ai',
+  '/admin/ai/models',
+  '/admin/ai/tools',
+  '/admin/ai/performance',
+  '/admin/ai/knowledge',
+  '/admin/ai/providers',
   '/admin/users',
   '/admin/system',
   '/admin/logs',
@@ -446,9 +451,11 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({
 
       {activeRoute === '/admin/terminal' && <AdminTerminalPage />}
 
-      {activeRoute === '/admin/ai' && (
+      {activeRoute.startsWith('/admin/ai') && (
         <AdminAIPage
           intelligence={intelligence}
+          activeRoute={activeRoute}
+          onNavigate={(next) => onNavigate(next)}
           onUpdated={setIntelligence}
           onNotice={setStatusNotice}
           onError={setConsoleError}
